@@ -20,43 +20,122 @@ st.markdown("Analysiere deine Amazon Business Reports für Detailseite Verkäufe
 
 # Hilfsfunktionen
 def parse_euro_value(value):
-    """Konvertiert Euro-Strings (z.B. '368,14 €') zu Float"""
+    """Konvertiert Euro-Strings (z.B. '1.999,55 €' oder '368,14 €') zu Float"""
     if pd.isna(value) or value == '':
         return 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    # Entferne Leerzeichen und €, ersetze Komma durch Punkt
-    value_str = str(value).replace(' ', '').replace('€', '').replace(',', '.')
+    
+    # Entferne Leerzeichen und €
+    value_str = str(value).replace(' ', '').replace('€', '').strip()
+    
+    # Format: "1.999,55" (Punkt = Tausender, Komma = Dezimal)
+    # Prüfe ob Punkt als Tausendertrennzeichen verwendet wird (mehr als ein Punkt)
+    if '.' in value_str and ',' in value_str:
+        # Format: "1.999,55" - Punkt ist Tausender, Komma ist Dezimal
+        value_str = value_str.replace('.', '').replace(',', '.')
+    elif ',' in value_str:
+        # Format: "368,14" - Komma ist Dezimal
+        value_str = value_str.replace(',', '.')
+    # Falls nur Punkt vorhanden, könnte es Tausender oder Dezimal sein
+    # Wenn mehr als ein Punkt, dann Tausender
+    elif value_str.count('.') > 1:
+        value_str = value_str.replace('.', '')
+    
     try:
         return float(value_str)
     except:
         return 0.0
 
 def parse_percentage(value):
-    """Konvertiert Prozent-Strings (z.B. '16.40%') zu Float"""
+    """Konvertiert Prozent-Strings (z.B. '16,40%' oder '16.40%') zu Float"""
     if pd.isna(value) or value == '':
         return 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    value_str = str(value).replace('%', '').replace(',', '.')
+    
+    value_str = str(value).replace('%', '').replace(' ', '').strip()
+    
+    # Komma als Dezimaltrennzeichen (deutsches Format)
+    if ',' in value_str:
+        value_str = value_str.replace(',', '.')
+    
     try:
         return float(value_str)
     except:
         return 0.0
 
+def parse_numeric_value(value):
+    """Konvertiert numerische Strings mit deutschem Format (z.B. '9,778' oder '6,333') zu Float"""
+    if pd.isna(value) or value == '':
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    value_str = str(value).replace(' ', '').strip()
+    
+    # Format: "9,778" (Komma als Tausendertrennzeichen) oder "1.234,56" (Punkt = Tausender, Komma = Dezimal)
+    if '.' in value_str and ',' in value_str:
+        # Format: "1.234,56" - Punkt ist Tausender, Komma ist Dezimal
+        value_str = value_str.replace('.', '').replace(',', '.')
+    elif ',' in value_str:
+        # Prüfe ob Komma Tausender oder Dezimal ist
+        parts = value_str.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            # Komma ist Dezimaltrennzeichen (z.B. "123,45")
+            value_str = value_str.replace(',', '.')
+        else:
+            # Komma ist Tausendertrennzeichen (z.B. "9,778" oder "6,333")
+            value_str = value_str.replace(',', '')
+    # Falls nur Punkt vorhanden und mehr als einer, dann Tausender
+    elif value_str.count('.') > 1:
+        value_str = value_str.replace('.', '')
+    
+    try:
+        return float(value_str)
+    except:
+        return 0.0
+
+def parse_date_column(date_str):
+    """Parst Datum im Format DD.MM.YY zu YYYY-MM-DD"""
+    if pd.isna(date_str) or date_str == '':
+        return None
+    date_str = str(date_str).strip()
+    # Versuche verschiedene Formate
+    date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{2})', date_str)
+    if date_match:
+        day, month, year = date_match.groups()
+        year_full = f"20{year}" if int(year) < 50 else f"19{year}"
+        return f"{year_full}-{month}-{day}"
+    return date_str
+
 def load_and_process_csv(uploaded_file, file_name):
-    """Lädt und verarbeitet eine CSV-Datei"""
+    """Lädt und verarbeitet eine CSV-Datei (ASIN-Level oder Account-Level)"""
     try:
         df = pd.read_csv(uploaded_file, encoding='utf-8')
         
-        # Extrahiere Datum aus Dateinamen (z.B. BusinessReport-02.12.25.csv)
-        date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{2})', file_name)
-        if date_match:
-            day, month, year = date_match.groups()
-            year_full = f"20{year}" if int(year) < 50 else f"19{year}"
-            date_str = f"{year_full}-{month}-{day}"
+        # Prüfe ob es ein Account-Level Report ist (hat "Datum"-Spalte)
+        is_account_level = 'Datum' in df.columns
+        
+        if is_account_level:
+            # Account-Level Report: Verwende Datumsspalte
+            df['Zeitraum'] = df['Datum'].apply(parse_date_column)
+            df = df.dropna(subset=['Zeitraum'])  # Entferne Zeilen ohne gültiges Datum
+            df['Dateiname'] = file_name
+            df['Report_Typ'] = 'Account-Level'
         else:
-            date_str = file_name
+            # ASIN-Level Report: Extrahiere Datum aus Dateinamen
+            date_match = re.search(r'(\d{2})\.(\d{2})\.(\d{2})', file_name)
+            if date_match:
+                day, month, year = date_match.groups()
+                year_full = f"20{year}" if int(year) < 50 else f"19{year}"
+                date_str = f"{year_full}-{month}-{day}"
+            else:
+                date_str = file_name
+            
+            df['Zeitraum'] = date_str
+            df['Dateiname'] = file_name
+            df['Report_Typ'] = 'ASIN-Level'
         
         # Verarbeite numerische Spalten
         numeric_columns = [
@@ -73,18 +152,31 @@ def load_and_process_csv(uploaded_file, file_name):
             'Sitzungen – mobile App',
             'Sitzungen – mobile App – B2B',
             'Sitzungen – Browser',
-            'Sitzungen – Browser – B2B'
+            'Sitzungen – Browser – B2B',
+            # Zusätzliche Spalten
+            'Durchschnittlicher Umsatz/Bestellposten',
+            'Durchschnittlicher Umsatz pro Bestellposten – B2B',
+            'Durchschnitt Anzahl von Einheiten/Bestellposten',
+            'Durchschnitt Anzahl von Einheiten/Bestellposten – B2B',
+            'Durchschnittlicher Verkaufspreis',
+            'Durchschnittlicher Verkaufspreis – B2B',
+            'Prozentsatz Bestellposten pro Sitzung',
+            'Bestellposten pro Sitzung Prozentwert – B2B',
+            'Durchschnittliche Angebotszahl'
         ]
         
         for col in numeric_columns:
             if col in df.columns:
-                if 'Umsatz' in col or 'Bestellsumme' in col:
+                # Euro-Werte
+                if 'Umsatz' in col or 'Bestellsumme' in col or 'Verkaufspreis' in col:
                     df[col] = df[col].apply(parse_euro_value)
+                # Prozentwerte
+                elif 'Prozentsatz' in col or 'Prozentwert' in col or col.endswith('%'):
+                    df[col] = df[col].apply(parse_percentage)
+                # Normale numerische Werte (können auch mit Komma als Tausendertrennzeichen sein)
                 else:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        df['Zeitraum'] = date_str
-        df['Dateiname'] = file_name
+                    # Konvertiere zu String, dann parse mit deutschem Format
+                    df[col] = df[col].apply(parse_numeric_value)
         
         return df
     except Exception as e:
@@ -118,8 +210,8 @@ def find_column(df, possible_names):
     
     return None
 
-def aggregate_data(df, traffic_type='normal'):
-    """Aggregiert Daten über alle ASINs und berechnet zusätzliche KPIs"""
+def aggregate_data(df, traffic_type='normal', is_account_level=False):
+    """Aggregiert Daten über alle ASINs (oder Account-Level) und berechnet zusätzliche KPIs"""
     if traffic_type == 'B2B':
         units_col = find_column(df, ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
         revenue_col = find_column(df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
@@ -260,17 +352,38 @@ def aggregate_data(df, traffic_type='normal'):
     if final_missing:
         st.warning(f"⚠️ Folgende Spalten fehlen wirklich in den Daten: {', '.join(final_missing)}")
     
-    aggregated = df.groupby('Zeitraum').agg({
-        units_col: 'sum',
-        revenue_col: 'sum',
-        views_col: 'sum',
-        sessions_col: 'sum',
-        orders_col: 'sum',
-        mobile_sessions_col: 'sum',
-        browser_sessions_col: 'sum'
-    }).reset_index()
+    # Bei Account-Level Reports sind die Daten bereits aggregiert, bei ASIN-Level müssen wir gruppieren
+    if is_account_level:
+        # Daten sind bereits pro Zeitraum aggregiert
+        aggregated = df.copy()
+        # Stelle sicher, dass alle benötigten Spalten vorhanden sind
+        for col in [units_col, revenue_col, views_col, sessions_col, orders_col, mobile_sessions_col, browser_sessions_col]:
+            if col not in aggregated.columns:
+                aggregated[col] = 0
+    else:
+        # ASIN-Level: Gruppiere nach Zeitraum
+        aggregated = df.groupby('Zeitraum').agg({
+            units_col: 'sum',
+            revenue_col: 'sum',
+            views_col: 'sum',
+            sessions_col: 'sum',
+            orders_col: 'sum',
+            mobile_sessions_col: 'sum',
+            browser_sessions_col: 'sum'
+        }).reset_index()
+    
+    # Stelle sicher, dass alle Spalten numerisch sind (mit deutschem Format)
+    for col in [units_col, revenue_col, views_col, sessions_col, orders_col, mobile_sessions_col, browser_sessions_col]:
+        if col in aggregated.columns:
+            # Verwende parse_numeric_value für alle numerischen Werte (erkennt Komma als Tausender)
+            # Ausnahme: revenue_col verwendet parse_euro_value
+            if col == revenue_col:
+                aggregated[col] = aggregated[col].apply(parse_euro_value)
+            else:
+                aggregated[col] = aggregated[col].apply(parse_numeric_value)
     
     # Berechne zusätzliche KPIs (mit Division durch Null Schutz)
+    # Spalten sind bereits numerisch konvertiert, können direkt verwendet werden
     aggregated['Conversion Rate (%)'] = (
         (aggregated[units_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
         .fillna(0)
@@ -287,20 +400,25 @@ def aggregate_data(df, traffic_type='normal'):
         .replace([np.inf, -np.inf], 0)
     )
     
-    # Umbenennen der Spalten
-    aggregated.columns = [
-        'Zeitraum', 
-        'Bestellte Einheiten', 
-        'Umsatz', 
-        'Seitenaufrufe',
-        'Sitzungen',
-        'Bestellungen',
-        'Mobile Sitzungen',
-        'Browser Sitzungen',
-        'Conversion Rate (%)',
-        'AOV (€)',
-        'Revenue per Session (€)'
-    ]
+    # Umbenennen der Spalten - nur die Spalten die tatsächlich vorhanden sind
+    column_mapping = {
+        'Zeitraum': 'Zeitraum',
+        units_col: 'Bestellte Einheiten',
+        revenue_col: 'Umsatz',
+        views_col: 'Seitenaufrufe',
+        sessions_col: 'Sitzungen',
+        orders_col: 'Bestellungen',
+        mobile_sessions_col: 'Mobile Sitzungen',
+        browser_sessions_col: 'Browser Sitzungen'
+    }
+    
+    # Benenne nur vorhandene Spalten um
+    for old_name, new_name in column_mapping.items():
+        if old_name in aggregated.columns and old_name != new_name:
+            aggregated = aggregated.rename(columns={old_name: new_name})
+    
+    # Stelle sicher, dass die berechneten Spalten vorhanden sind
+    # (sie wurden bereits oben hinzugefügt)
     
     return aggregated
 
@@ -416,15 +534,26 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
     else:
         summary_parts.append(f"➡️ Der Umsatz ist unverändert bei {current['Umsatz']:,.2f} €.")
     
-    # Seitenaufrufe
-    views_change = current['Seitenaufrufe'] - previous['Seitenaufrufe']
-    views_pct = ((current['Seitenaufrufe'] / previous['Seitenaufrufe'] - 1) * 100) if previous['Seitenaufrufe'] > 0 else 0
-    if views_change > 0:
-        summary_parts.append(f"✅ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gestiegen (+{views_change:.0f}, {views_pct:+.1f}%).")
-    elif views_change < 0:
-        summary_parts.append(f"❌ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gesunken ({views_change:.0f}, {views_pct:+.1f}%).")
-    else:
-        summary_parts.append(f"➡️ Die Seitenaufrufe sind unverändert bei {current['Seitenaufrufe']:.0f}.")
+    # Seitenaufrufe (nur wenn verfügbar)
+    if 'Seitenaufrufe' in current and 'Seitenaufrufe' in previous:
+        views_change = current['Seitenaufrufe'] - previous['Seitenaufrufe']
+        views_pct = ((current['Seitenaufrufe'] / previous['Seitenaufrufe'] - 1) * 100) if previous['Seitenaufrufe'] > 0 else 0
+        if views_change > 0:
+            summary_parts.append(f"✅ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gestiegen (+{views_change:.0f}, {views_pct:+.1f}%).")
+        elif views_change < 0:
+            summary_parts.append(f"❌ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gesunken ({views_change:.0f}, {views_pct:+.1f}%).")
+        else:
+            summary_parts.append(f"➡️ Die Seitenaufrufe sind unverändert bei {current['Seitenaufrufe']:.0f}.")
+    elif 'Sitzungen' in current and 'Sitzungen' in previous:
+        # Falls keine Seitenaufrufe, verwende Sitzungen
+        sessions_change = current['Sitzungen'] - previous['Sitzungen']
+        sessions_pct = ((current['Sitzungen'] / previous['Sitzungen'] - 1) * 100) if previous['Sitzungen'] > 0 else 0
+        if sessions_change > 0:
+            summary_parts.append(f"✅ Die Sitzungen sind von {previous['Sitzungen']:.0f} auf {current['Sitzungen']:.0f} gestiegen (+{sessions_change:.0f}, {sessions_pct:+.1f}%).")
+        elif sessions_change < 0:
+            summary_parts.append(f"❌ Die Sitzungen sind von {previous['Sitzungen']:.0f} auf {current['Sitzungen']:.0f} gesunken ({sessions_change:.0f}, {sessions_pct:+.1f}%).")
+        else:
+            summary_parts.append(f"➡️ Die Sitzungen sind unverändert bei {current['Sitzungen']:.0f}.")
     
     # Conversion Rate
     if 'Conversion Rate (%)' in current and 'Conversion Rate (%)' in previous:
@@ -494,27 +623,38 @@ if uploaded_files:
         )
         traffic_type_key = 'B2B' if traffic_type == 'B2B' else 'normal'
         
-        # ASIN-Filter - verwende untergeordnete ASINs
-        asin_column = '(Untergeordnete) ASIN'
-        if asin_column not in combined_df.columns:
-            # Fallback auf übergeordnete ASINs falls Spalte nicht existiert
-            asin_column = '(Übergeordnete) ASIN'
+        # Prüfe ob es Account-Level oder ASIN-Level Reports sind
+        is_account_level = combined_df['Report_Typ'].iloc[0] == 'Account-Level' if 'Report_Typ' in combined_df.columns else False
         
-        all_asins = combined_df[asin_column].unique().tolist()
-        all_asins = [asin for asin in all_asins if pd.notna(asin) and str(asin).strip() != '']  # Entferne leere Werte
-        all_asins.sort()
-        
-        selected_asins = st.sidebar.multiselect(
-            "ASINs filtern (leer = alle)",
-            all_asins,
-            default=[]
-        )
-        
-        # Filtere Daten nach ASINs
-        if selected_asins:
-            filtered_df = combined_df[combined_df[asin_column].isin(selected_asins)].copy()
+        # ASIN-Filter nur bei ASIN-Level Reports
+        if not is_account_level:
+            asin_column = '(Untergeordnete) ASIN'
+            if asin_column not in combined_df.columns:
+                # Fallback auf übergeordnete ASINs falls Spalte nicht existiert
+                asin_column = '(Übergeordnete) ASIN'
+            
+            if asin_column in combined_df.columns:
+                all_asins = combined_df[asin_column].unique().tolist()
+                all_asins = [asin for asin in all_asins if pd.notna(asin) and str(asin).strip() != '']  # Entferne leere Werte
+                all_asins.sort()
+                
+                selected_asins = st.sidebar.multiselect(
+                    "ASINs filtern (leer = alle)",
+                    all_asins,
+                    default=[]
+                )
+                
+                # Filtere Daten nach ASINs
+                if selected_asins:
+                    filtered_df = combined_df[combined_df[asin_column].isin(selected_asins)].copy()
+                else:
+                    filtered_df = combined_df.copy()
+            else:
+                filtered_df = combined_df.copy()
         else:
+            # Account-Level: Keine ASIN-Filterung möglich
             filtered_df = combined_df.copy()
+            st.sidebar.info("ℹ️ Account-Level Report: ASIN-Filterung nicht verfügbar")
         
         # Hauptbereich
         st.header("📈 KPI-Übersicht")
@@ -546,7 +686,7 @@ if uploaded_files:
                     st.write(f"- '{term}': {matching}")
         
         # Aggregiere Daten
-        aggregated_data = aggregate_data(filtered_df, traffic_type_key)
+        aggregated_data = aggregate_data(filtered_df, traffic_type_key, is_account_level=is_account_level)
         
         # Erstelle numerische Zeitraum-IDs für die X-Achse
         aggregated_data = aggregated_data.copy()
@@ -577,16 +717,41 @@ if uploaded_files:
             views_col_stat = 'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B'
         
         with col1:
-            total_units = filtered_df[units_col_stat].sum() if units_col_stat in filtered_df.columns else 0
+            if units_col_stat and units_col_stat in filtered_df.columns:
+                units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
+                total_units = units_numeric.sum()
+            else:
+                total_units = 0
             st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
         
         with col2:
-            total_revenue = filtered_df[revenue_col_stat].sum() if revenue_col_stat in filtered_df.columns else 0
+            if revenue_col_stat and revenue_col_stat in filtered_df.columns:
+                revenue_numeric = filtered_df[revenue_col_stat].apply(parse_euro_value)
+                total_revenue = revenue_numeric.sum()
+            else:
+                total_revenue = 0
             st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
         
         with col3:
-            total_views = filtered_df[views_col_stat].sum() if views_col_stat in filtered_df.columns else 0
-            st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+            # Seitenaufrufe oder Sitzungen
+            if views_col_stat and views_col_stat in filtered_df.columns:
+                # Konvertiere zu numerisch und berechne Summe
+                views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
+                total_views = views_numeric.sum()
+                if total_views > 0:
+                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                elif 'Sitzungen – Summe' in filtered_df.columns:
+                    sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
+                    total_sessions = sessions_numeric.sum()
+                    st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
+                else:
+                    st.metric("Gesamt Seitenaufrufe", "N/A")
+            elif 'Sitzungen – Summe' in filtered_df.columns:
+                sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
+                total_sessions = sessions_numeric.sum()
+                st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
+            else:
+                st.metric("Gesamt Seitenaufrufe", "N/A")
         
         with col4:
             asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
@@ -634,24 +799,50 @@ if uploaded_files:
             st.plotly_chart(fig_revenue, use_container_width=True)
         
         with col3:
-            fig_views = px.bar(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='Seitenaufrufe',
-                title=f'Seitenaufrufe ({traffic_type})',
-                labels={'Seitenaufrufe': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
-            )
-            fig_views.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-            fig_views.update_xaxes(title_text='Zeitraum')
-            fig_views.update_traces(marker_color='blue')
-            st.plotly_chart(fig_views, use_container_width=True)
+            # Seitenaufrufe nur anzeigen, wenn verfügbar
+            if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
+                fig_views = px.bar(
+                    aggregated_data,
+                    x='Zeitraum_Nr',
+                    y='Seitenaufrufe',
+                    title=f'Seitenaufrufe ({traffic_type})',
+                    labels={'Seitenaufrufe': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
+                )
+                fig_views.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+                fig_views.update_xaxes(title_text='Zeitraum')
+                fig_views.update_traces(marker_color='blue')
+                st.plotly_chart(fig_views, use_container_width=True)
+            else:
+                # Zeige Sitzungen statt Seitenaufrufe, falls verfügbar
+                if 'Sitzungen' in aggregated_data.columns:
+                    fig_sessions = px.bar(
+                        aggregated_data,
+                        x='Zeitraum_Nr',
+                        y='Sitzungen',
+                        title=f'Sitzungen ({traffic_type})',
+                        labels={'Sitzungen': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
+                    )
+                    fig_sessions.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+                    fig_sessions.update_xaxes(title_text='Zeitraum')
+                    fig_sessions.update_traces(marker_color='blue')
+                    st.plotly_chart(fig_sessions, use_container_width=True)
+                else:
+                    st.info("Seitenaufrufe-Daten nicht verfügbar")
         
         # Kombinierte Visualisierung
         st.subheader("📊 Kombinierte KPI-Übersicht")
         
+        # Bestimme den dritten Titel basierend auf verfügbaren Daten
+        if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
+            third_title = 'Seitenaufrufe'
+        elif 'Sitzungen' in aggregated_data.columns:
+            third_title = 'Sitzungen'
+        else:
+            third_title = 'Nicht verfügbar'
+        
         fig_combined = make_subplots(
             rows=1, cols=3,
-            subplot_titles=('Bestellte Einheiten', 'Umsatz (€)', 'Seitenaufrufe'),
+            subplot_titles=('Bestellte Einheiten', 'Umsatz (€)', third_title),
             specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}]]
         )
         
@@ -665,10 +856,22 @@ if uploaded_files:
             row=1, col=2
         )
         
-        fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
-            row=1, col=3
-        )
+        # Seitenaufrufe oder Sitzungen für dritte Spalte
+        if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
+            fig_combined.add_trace(
+                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
+                row=1, col=3
+            )
+        elif 'Sitzungen' in aggregated_data.columns:
+            fig_combined.add_trace(
+                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Sitzungen'], name='Sitzungen', marker_color='blue'),
+                row=1, col=3
+            )
+        else:
+            fig_combined.add_trace(
+                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=[0]*len(aggregated_data), name='Nicht verfügbar', marker_color='gray'),
+                row=1, col=3
+            )
         
         fig_combined.update_layout(height=400, showlegend=False)
         fig_combined.update_xaxes(title_text='Zeitraum', tickmode='linear', tick0=1, dtick=1)
@@ -719,60 +922,64 @@ if uploaded_files:
             fig_rps.update_traces(marker_color='teal')
             st.plotly_chart(fig_rps, use_container_width=True)
         
-        # Mobile vs Browser Performance
-        st.subheader("📱 Mobile vs Browser Performance")
-        
-        # Bereite Daten für Mobile vs Browser vor
-        mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
-        mobile_browser_data = mobile_browser_data.melt(
-            id_vars='Zeitraum_Nr',
-            value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
-            var_name='Gerät',
-            value_name='Sitzungen'
-        )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_mobile_browser = px.bar(
-                mobile_browser_data,
-                x='Zeitraum_Nr',
-                y='Sitzungen',
-                color='Gerät',
-                title=f'Mobile vs Browser Sitzungen ({traffic_type})',
-                labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
-                color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
-            )
-            fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-            fig_mobile_browser.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_mobile_browser, use_container_width=True)
-        
-        with col2:
-            # Berechne Mobile vs Browser Anteil
-            mobile_browser_pct = aggregated_data.copy()
-            total_sessions = mobile_browser_pct['Mobile Sitzungen'] + mobile_browser_pct['Browser Sitzungen']
-            mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions * 100).fillna(0)
-            mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions * 100).fillna(0)
+        # Mobile vs Browser Performance (nur wenn Daten verfügbar)
+        if 'Mobile Sitzungen' in aggregated_data.columns and 'Browser Sitzungen' in aggregated_data.columns:
+            st.subheader("📱 Mobile vs Browser Performance")
             
-            mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
+            # Bereite Daten für Mobile vs Browser vor
+            mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
+            mobile_browser_data = mobile_browser_data.melt(
                 id_vars='Zeitraum_Nr',
-                value_vars=['Mobile %', 'Browser %'],
+                value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
                 var_name='Gerät',
-                value_name='Anteil (%)'
+                value_name='Sitzungen'
             )
             
-            fig_mobile_browser_pct = px.bar(
-                mobile_browser_pct_data,
-                x='Zeitraum_Nr',
-                y='Anteil (%)',
-                color='Gerät',
-                title=f'Mobile vs Browser Anteil ({traffic_type})',
-                labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
-                color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
-            )
-            fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
-            fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig_mobile_browser = px.bar(
+                    mobile_browser_data,
+                    x='Zeitraum_Nr',
+                    y='Sitzungen',
+                    color='Gerät',
+                    title=f'Mobile vs Browser Sitzungen ({traffic_type})',
+                    labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
+                    color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
+                )
+                fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+                fig_mobile_browser.update_xaxes(title_text='Zeitraum')
+                st.plotly_chart(fig_mobile_browser, use_container_width=True)
+            
+            with col2:
+                # Berechne Mobile vs Browser Anteil
+                mobile_browser_pct = aggregated_data.copy()
+                total_sessions = mobile_browser_pct['Mobile Sitzungen'] + mobile_browser_pct['Browser Sitzungen']
+                mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions * 100).fillna(0)
+                mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions * 100).fillna(0)
+                
+                mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
+                    id_vars='Zeitraum_Nr',
+                    value_vars=['Mobile %', 'Browser %'],
+                    var_name='Gerät',
+                    value_name='Anteil (%)'
+                )
+                
+                fig_mobile_browser_pct = px.bar(
+                    mobile_browser_pct_data,
+                    x='Zeitraum_Nr',
+                    y='Anteil (%)',
+                    color='Gerät',
+                    title=f'Mobile vs Browser Anteil ({traffic_type})',
+                    labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
+                    color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
+                )
+                fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
+                fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
+                st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
+        else:
+            # Mobile/Browser Daten nicht verfügbar
+            st.info("📱 Mobile vs Browser Performance-Daten nicht verfügbar für diesen Report-Typ.")
         
         # Zusammenfassung
         st.header("📝 Zusammenfassung")
@@ -787,39 +994,25 @@ if uploaded_files:
         
         st.markdown(summary)
         
-        # Top- und Flop-ASINs
-        st.subheader("🏆 Top- und Flop-ASINs")
-        
-        # Verwende den aktuellsten Zeitraum für Top/Flop Analyse
-        latest_period = aggregated_data['Zeitraum'].iloc[-1] if len(aggregated_data) > 0 else None
-        if latest_period:
-            latest_df = filtered_df[filtered_df['Zeitraum'] == latest_period].copy()
-        else:
-            latest_df = filtered_df.copy()
-        
-        top_asins, flop_asins = get_top_flop_asins(latest_df, traffic_type_key)
-        
-        if top_asins is not None and len(top_asins) > 0:
-            col1, col2 = st.columns(2)
+        # Top- und Flop-ASINs (nur bei ASIN-Level Reports)
+        if not is_account_level:
+            st.subheader("🏆 Top- und Flop-ASINs")
             
-            with col1:
-                st.markdown("### 🟢 Top ASIN (nach Umsatz)")
-                row = top_asins.iloc[0]
-                with st.container():
-                    st.markdown(f"**{row['ASIN']}**")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                        st.metric("Einheiten", f"{row['Einheiten']:.0f}")
-                    with col_b:
-                        st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                        st.metric("AOV", f"{row['AOV (€)']:.2f} €")
-                    st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+            # Verwende den aktuellsten Zeitraum für Top/Flop Analyse
+            latest_period = aggregated_data['Zeitraum'].iloc[-1] if len(aggregated_data) > 0 else None
+            if latest_period:
+                latest_df = filtered_df[filtered_df['Zeitraum'] == latest_period].copy()
+            else:
+                latest_df = filtered_df.copy()
             
-            with col2:
-                if flop_asins is not None and len(flop_asins) > 0:
-                    st.markdown("### 🔴 Flop ASIN (nach Umsatz)")
-                    row = flop_asins.iloc[0]
+            top_asins, flop_asins = get_top_flop_asins(latest_df, traffic_type_key)
+            
+            if top_asins is not None and len(top_asins) > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("### 🟢 Top ASIN (nach Umsatz)")
+                    row = top_asins.iloc[0]
                     with st.container():
                         st.markdown(f"**{row['ASIN']}**")
                         col_a, col_b = st.columns(2)
@@ -830,11 +1023,28 @@ if uploaded_files:
                             st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
                             st.metric("AOV", f"{row['AOV (€)']:.2f} €")
                         st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
-                else:
-                    st.markdown("### 🔴 Flop ASIN")
-                    st.info("Keine Flop-ASIN verfügbar (nur ein ASIN mit Umsatz vorhanden oder alle ASINs haben keinen Umsatz).")
+                
+                with col2:
+                    if flop_asins is not None and len(flop_asins) > 0:
+                        st.markdown("### 🔴 Flop ASIN (nach Umsatz)")
+                        row = flop_asins.iloc[0]
+                        with st.container():
+                            st.markdown(f"**{row['ASIN']}**")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            with col_b:
+                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                            st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+                    else:
+                        st.markdown("### 🔴 Flop ASIN")
+                        st.info("Keine Flop-ASIN verfügbar (nur ein ASIN mit Umsatz vorhanden oder alle ASINs haben keinen Umsatz).")
+            else:
+                st.info("Top- und Flop-ASINs konnten nicht berechnet werden. Bitte überprüfe die Daten.")
         else:
-            st.info("Top- und Flop-ASINs konnten nicht berechnet werden. Bitte überprüfe die Daten.")
+            st.info("ℹ️ Account-Level Report: Top- und Flop-ASINs sind nicht verfügbar (Daten sind bereits auf Account-Ebene aggregiert).")
         
         # Detaillierte Tabelle
         st.header("📋 Detaillierte Daten")
@@ -848,12 +1058,15 @@ if uploaded_files:
             'Sitzungen - Summe'
         ])
         
-        display_columns = [
-            'Zeitraum',
-            '(Übergeordnete) ASIN',
-            '(Untergeordnete) ASIN',
-            'Titel'
-        ]
+        display_columns = ['Zeitraum']
+        
+        # Füge ASIN-Spalten nur hinzu, wenn vorhanden (nicht bei Account-Level)
+        if '(Übergeordnete) ASIN' in filtered_df.columns:
+            display_columns.append('(Übergeordnete) ASIN')
+        if '(Untergeordnete) ASIN' in filtered_df.columns:
+            display_columns.append('(Untergeordnete) ASIN')
+        if 'Titel' in filtered_df.columns:
+            display_columns.append('Titel')
         
         # Füge dynamisch gefundene Spalten hinzu
         if units_col_display:
