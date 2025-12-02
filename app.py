@@ -786,67 +786,8 @@ if uploaded_files:
         
         st.divider()
         
-        # Erstelle Visualisierungen
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            fig_units = px.bar(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='Bestellte Einheiten',
-                title=f'Bestellte Einheiten ({traffic_type})',
-                labels={'Bestellte Einheiten': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
-            )
-            fig_units.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-            fig_units.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_units, use_container_width=True)
-        
-        with col2:
-            fig_revenue = px.bar(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='Umsatz',
-                title=f'Umsatz ({traffic_type})',
-                labels={'Umsatz': 'Umsatz (€)', 'Zeitraum_Nr': 'Zeitraum'}
-            )
-            fig_revenue.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-            fig_revenue.update_xaxes(title_text='Zeitraum')
-            fig_revenue.update_traces(marker_color='green')
-            st.plotly_chart(fig_revenue, use_container_width=True)
-        
-        with col3:
-            # Seitenaufrufe nur anzeigen, wenn verfügbar
-            if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
-                fig_views = px.bar(
-                    aggregated_data,
-                    x='Zeitraum_Nr',
-                    y='Seitenaufrufe',
-                    title=f'Seitenaufrufe ({traffic_type})',
-                    labels={'Seitenaufrufe': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
-                )
-                fig_views.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-                fig_views.update_xaxes(title_text='Zeitraum')
-                fig_views.update_traces(marker_color='blue')
-                st.plotly_chart(fig_views, use_container_width=True)
-            else:
-                # Zeige Sitzungen statt Seitenaufrufe, falls verfügbar
-                if 'Sitzungen' in aggregated_data.columns:
-                    fig_sessions = px.bar(
-                        aggregated_data,
-                        x='Zeitraum_Nr',
-                        y='Sitzungen',
-                        title=f'Sitzungen ({traffic_type})',
-                        labels={'Sitzungen': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
-                    )
-                    fig_sessions.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-                    fig_sessions.update_xaxes(title_text='Zeitraum')
-                    fig_sessions.update_traces(marker_color='blue')
-                    st.plotly_chart(fig_sessions, use_container_width=True)
-                else:
-                    st.info("Seitenaufrufe-Daten nicht verfügbar")
-        
-        # Kombinierte Visualisierung
-        st.subheader("📊 Kombinierte KPI-Übersicht")
+        # KPI-Übersicht (Kombinierte Visualisierung)
+        st.subheader("📊 KPI-Übersicht")
         
         # Bestimme den dritten Titel basierend auf verfügbaren Daten
         if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
@@ -939,63 +880,70 @@ if uploaded_files:
             st.plotly_chart(fig_rps, use_container_width=True)
         
         # Mobile vs Browser Performance (nur wenn Daten verfügbar)
-        if 'Mobile Sitzungen' in aggregated_data.columns and 'Browser Sitzungen' in aggregated_data.columns:
-            st.subheader("📱 Mobile vs Browser Performance")
+        # Prüfe ob sowohl Mobile als auch Browser Daten vorhanden sind UND ob sie nicht alle 0 sind
+        has_mobile_data = 'Mobile Sitzungen' in aggregated_data.columns
+        has_browser_data = 'Browser Sitzungen' in aggregated_data.columns
+        
+        if has_mobile_data and has_browser_data:
+            # Prüfe ob Daten vorhanden sind (nicht alle 0)
+            mobile_sum = aggregated_data['Mobile Sitzungen'].sum() if has_mobile_data else 0
+            browser_sum = aggregated_data['Browser Sitzungen'].sum() if has_browser_data else 0
             
-            # Bereite Daten für Mobile vs Browser vor
-            mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
-            mobile_browser_data = mobile_browser_data.melt(
-                id_vars='Zeitraum_Nr',
-                value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
-                var_name='Gerät',
-                value_name='Sitzungen'
-            )
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_mobile_browser = px.bar(
-                    mobile_browser_data,
-                    x='Zeitraum_Nr',
-                    y='Sitzungen',
-                    color='Gerät',
-                    title=f'Mobile vs Browser Sitzungen ({traffic_type})',
-                    labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
-                    color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
-                )
-                fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
-                fig_mobile_browser.update_xaxes(title_text='Zeitraum')
-                st.plotly_chart(fig_mobile_browser, use_container_width=True)
-            
-            with col2:
-                # Berechne Mobile vs Browser Anteil
-                mobile_browser_pct = aggregated_data.copy()
-                total_sessions = mobile_browser_pct['Mobile Sitzungen'] + mobile_browser_pct['Browser Sitzungen']
-                mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions * 100).fillna(0)
-                mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions * 100).fillna(0)
+            if mobile_sum > 0 or browser_sum > 0:
+                st.subheader("📱 Mobile vs Browser Performance")
                 
-                mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
+                # Bereite Daten für Mobile vs Browser vor
+                mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
+                mobile_browser_data = mobile_browser_data.melt(
                     id_vars='Zeitraum_Nr',
-                    value_vars=['Mobile %', 'Browser %'],
+                    value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
                     var_name='Gerät',
-                    value_name='Anteil (%)'
+                    value_name='Sitzungen'
                 )
                 
-                fig_mobile_browser_pct = px.bar(
-                    mobile_browser_pct_data,
-                    x='Zeitraum_Nr',
-                    y='Anteil (%)',
-                    color='Gerät',
-                    title=f'Mobile vs Browser Anteil ({traffic_type})',
-                    labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
-                    color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
-                )
-                fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
-                fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
-                st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
-        else:
-            # Mobile/Browser Daten nicht verfügbar
-            st.info("📱 Mobile vs Browser Performance-Daten nicht verfügbar für diesen Report-Typ.")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig_mobile_browser = px.bar(
+                        mobile_browser_data,
+                        x='Zeitraum_Nr',
+                        y='Sitzungen',
+                        color='Gerät',
+                        title=f'Mobile vs Browser Sitzungen ({traffic_type})',
+                        labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
+                        color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
+                    )
+                    fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+                    fig_mobile_browser.update_xaxes(title_text='Zeitraum')
+                    st.plotly_chart(fig_mobile_browser, use_container_width=True)
+                
+                with col2:
+                    # Berechne Mobile vs Browser Anteil
+                    mobile_browser_pct = aggregated_data.copy()
+                    total_sessions = mobile_browser_pct['Mobile Sitzungen'] + mobile_browser_pct['Browser Sitzungen']
+                    mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions.replace(0, np.nan) * 100).fillna(0)
+                    mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions.replace(0, np.nan) * 100).fillna(0)
+                    
+                    mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
+                        id_vars='Zeitraum_Nr',
+                        value_vars=['Mobile %', 'Browser %'],
+                        var_name='Gerät',
+                        value_name='Anteil (%)'
+                    )
+                    
+                    fig_mobile_browser_pct = px.bar(
+                        mobile_browser_pct_data,
+                        x='Zeitraum_Nr',
+                        y='Anteil (%)',
+                        color='Gerät',
+                        title=f'Mobile vs Browser Anteil ({traffic_type})',
+                        labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
+                        color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
+                    )
+                    fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
+                    fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
+                    st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
+            # Wenn keine Daten vorhanden, wird die Sektion einfach nicht angezeigt
         
         # Zusammenfassung
         st.header("📝 Zusammenfassung")
