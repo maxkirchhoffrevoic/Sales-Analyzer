@@ -355,41 +355,48 @@ if uploaded_files:
         # Aggregiere Daten
         aggregated_data = aggregate_data(filtered_df, traffic_type_key)
         
+        # Erstelle numerische Zeitraum-IDs für die X-Achse
+        aggregated_data = aggregated_data.copy()
+        aggregated_data['Zeitraum_Nr'] = range(1, len(aggregated_data) + 1)
+        
         # Erstelle Visualisierungen
         col1, col2, col3 = st.columns(3)
         
         with col1:
             fig_units = px.bar(
                 aggregated_data,
-                x='Zeitraum',
+                x='Zeitraum_Nr',
                 y='Bestellte Einheiten',
                 title=f'Bestellte Einheiten ({traffic_type})',
-                labels={'Bestellte Einheiten': 'Anzahl', 'Zeitraum': 'Zeitraum'}
+                labels={'Bestellte Einheiten': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
             )
-            fig_units.update_layout(height=300)
+            fig_units.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_units.update_xaxes(title_text='Zeitraum')
             st.plotly_chart(fig_units, use_container_width=True)
         
         with col2:
             fig_revenue = px.bar(
                 aggregated_data,
-                x='Zeitraum',
+                x='Zeitraum_Nr',
                 y='Umsatz',
                 title=f'Umsatz ({traffic_type})',
-                labels={'Umsatz': 'Umsatz (€)', 'Zeitraum': 'Zeitraum'}
+                labels={'Umsatz': 'Umsatz (€)', 'Zeitraum_Nr': 'Zeitraum'}
             )
-            fig_revenue.update_layout(height=300)
+            fig_revenue.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_revenue.update_xaxes(title_text='Zeitraum')
             fig_revenue.update_traces(marker_color='green')
             st.plotly_chart(fig_revenue, use_container_width=True)
         
         with col3:
             fig_views = px.bar(
                 aggregated_data,
-                x='Zeitraum',
+                x='Zeitraum_Nr',
                 y='Seitenaufrufe',
                 title=f'Seitenaufrufe ({traffic_type})',
-                labels={'Seitenaufrufe': 'Anzahl', 'Zeitraum': 'Zeitraum'}
+                labels={'Seitenaufrufe': 'Anzahl', 'Zeitraum_Nr': 'Zeitraum'}
             )
-            fig_views.update_layout(height=300)
+            fig_views.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_views.update_xaxes(title_text='Zeitraum')
             fig_views.update_traces(marker_color='blue')
             st.plotly_chart(fig_views, use_container_width=True)
         
@@ -403,21 +410,22 @@ if uploaded_files:
         )
         
         fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Bestellte Einheiten'], name='Einheiten'),
+            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Bestellte Einheiten'], name='Einheiten'),
             row=1, col=1
         )
         
         fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Umsatz'], name='Umsatz', marker_color='green'),
+            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Umsatz'], name='Umsatz', marker_color='green'),
             row=1, col=2
         )
         
         fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
+            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
             row=1, col=3
         )
         
         fig_combined.update_layout(height=400, showlegend=False)
+        fig_combined.update_xaxes(title_text='Zeitraum', tickmode='linear', tick0=1, dtick=1)
         st.plotly_chart(fig_combined, use_container_width=True)
         
         # Zusammenfassung
