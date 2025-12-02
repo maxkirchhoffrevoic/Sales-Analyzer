@@ -552,6 +552,59 @@ if uploaded_files:
         aggregated_data = aggregated_data.copy()
         aggregated_data['Zeitraum_Nr'] = range(1, len(aggregated_data) + 1)
         
+        # Statistiken (ganz oben)
+        st.header("📊 Statistiken")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        # Finde die tatsächlichen Spaltennamen (mit flexibler Suche)
+        units_col_stat = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
+        revenue_col_stat = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B', 'Bestellsumme - B2B'])
+        views_col_stat = find_column(filtered_df, [
+            'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
+            'Seitenaufrufe - Summe',
+            'Sitzungen – Summe',
+            'Sitzungen - Summe',
+            'Seitenaufrufe – Summe – B2B',
+            'Seitenaufrufe - Summe - B2B'
+        ])
+        
+        # Fallback falls Spalten nicht gefunden werden
+        if units_col_stat is None:
+            units_col_stat = 'Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B'
+        if revenue_col_stat is None:
+            revenue_col_stat = 'Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B'
+        if views_col_stat is None:
+            views_col_stat = 'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B'
+        
+        with col1:
+            total_units = filtered_df[units_col_stat].sum() if units_col_stat in filtered_df.columns else 0
+            st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+        
+        with col2:
+            total_revenue = filtered_df[revenue_col_stat].sum() if revenue_col_stat in filtered_df.columns else 0
+            st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+        
+        with col3:
+            total_views = filtered_df[views_col_stat].sum() if views_col_stat in filtered_df.columns else 0
+            st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+        
+        with col4:
+            asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
+            unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
+            st.metric("Anzahl ASINs", f"{unique_asins}")
+        
+        with col5:
+            # Durchschnittliche Conversion Rate
+            avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
+            st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+        
+        with col6:
+            # Durchschnittlicher AOV
+            avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
+            st.metric("Ø AOV", f"{avg_aov:.2f} €")
+        
+        st.divider()
+        
         # Erstelle Visualisierungen
         col1, col2, col3 = st.columns(3)
         
@@ -816,57 +869,6 @@ if uploaded_files:
             use_container_width=True,
             height=400
         )
-        
-        # Statistiken
-        st.header("📊 Statistiken")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        
-        # Finde die tatsächlichen Spaltennamen (mit flexibler Suche)
-        units_col_stat = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
-        revenue_col_stat = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B', 'Bestellsumme - B2B'])
-        views_col_stat = find_column(filtered_df, [
-            'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
-            'Seitenaufrufe - Summe',
-            'Sitzungen – Summe',
-            'Sitzungen - Summe',
-            'Seitenaufrufe – Summe – B2B',
-            'Seitenaufrufe - Summe - B2B'
-        ])
-        
-        # Fallback falls Spalten nicht gefunden werden
-        if units_col_stat is None:
-            units_col_stat = 'Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B'
-        if revenue_col_stat is None:
-            revenue_col_stat = 'Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B'
-        if views_col_stat is None:
-            views_col_stat = 'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B'
-        
-        with col1:
-            total_units = filtered_df[units_col_stat].sum() if units_col_stat in filtered_df.columns else 0
-            st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
-        
-        with col2:
-            total_revenue = filtered_df[revenue_col_stat].sum() if revenue_col_stat in filtered_df.columns else 0
-            st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
-        
-        with col3:
-            total_views = filtered_df[views_col_stat].sum() if views_col_stat in filtered_df.columns else 0
-            st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
-        
-        with col4:
-            asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
-            unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
-            st.metric("Anzahl ASINs", f"{unique_asins}")
-        
-        with col5:
-            # Durchschnittliche Conversion Rate
-            avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
-            st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
-        
-        with col6:
-            # Durchschnittlicher AOV
-            avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
-            st.metric("Ø AOV", f"{avg_aov:.2f} €")
     else:
         st.error("Keine Daten konnten geladen werden. Bitte überprüfe die CSV-Dateien.")
 else:
