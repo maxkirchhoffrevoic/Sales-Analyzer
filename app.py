@@ -65,7 +65,15 @@ def load_and_process_csv(uploaded_file, file_name):
             'Durch bestellte Produkte erzielter Umsatz',
             'Bestellsumme – B2B',
             'Seitenaufrufe – Summe',
-            'Seitenaufrufe – Summe – B2B'
+            'Seitenaufrufe – Summe – B2B',
+            'Sitzungen – Summe',
+            'Sitzungen – Summe – B2B',
+            'Zahl der Bestellposten',
+            'Zahl der Bestellposten – B2B',
+            'Sitzungen – mobile App',
+            'Sitzungen – mobile App – B2B',
+            'Sitzungen – Browser',
+            'Sitzungen – Browser – B2B'
         ]
         
         for col in numeric_columns:
@@ -111,7 +119,7 @@ def find_column(df, possible_names):
     return None
 
 def aggregate_data(df, traffic_type='normal'):
-    """Aggregiert Daten über alle ASINs"""
+    """Aggregiert Daten über alle ASINs und berechnet zusätzliche KPIs"""
     if traffic_type == 'B2B':
         units_col = find_column(df, ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
         revenue_col = find_column(df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
@@ -121,6 +129,10 @@ def aggregate_data(df, traffic_type='normal'):
             'Sitzungen – Summe – B2B',
             'Sitzungen - Summe - B2B'
         ])
+        sessions_col = find_column(df, ['Sitzungen – Summe – B2B', 'Sitzungen - Summe - B2B'])
+        orders_col = find_column(df, ['Zahl der Bestellposten – B2B', 'Zahl der Bestellposten - B2B'])
+        mobile_sessions_col = find_column(df, ['Sitzungen – mobile App – B2B', 'Sitzungen - mobile App - B2B'])
+        browser_sessions_col = find_column(df, ['Sitzungen – Browser – B2B', 'Sitzungen - Browser - B2B'])
     else:
         units_col = find_column(df, ['Bestellte Einheiten'])
         revenue_col = find_column(df, ['Durch bestellte Produkte erzielter Umsatz'])
@@ -131,6 +143,10 @@ def aggregate_data(df, traffic_type='normal'):
             'Sitzungen – Summe',
             'Sitzungen - Summe'
         ])
+        sessions_col = find_column(df, ['Sitzungen – Summe', 'Sitzungen - Summe'])
+        orders_col = find_column(df, ['Zahl der Bestellposten'])
+        mobile_sessions_col = find_column(df, ['Sitzungen – mobile App', 'Sitzungen - mobile App'])
+        browser_sessions_col = find_column(df, ['Sitzungen – Browser', 'Sitzungen - Browser'])
     
     # Prüfe ob alle benötigten Spalten vorhanden sind
     # WICHTIG: Prüfe ob Spalte wirklich im DataFrame existiert, nicht ob Werte 0 sind
@@ -181,6 +197,42 @@ def aggregate_data(df, traffic_type='normal'):
                 df[expected_name] = 0
                 views_col = expected_name
     
+    # Für sessions_col
+    if sessions_col is None:
+        expected_name = 'Sitzungen – Summe' + (' – B2B' if traffic_type == 'B2B' else '')
+        if expected_name in df.columns:
+            sessions_col = expected_name
+        else:
+            df[expected_name] = 0
+            sessions_col = expected_name
+    
+    # Für orders_col
+    if orders_col is None:
+        expected_name = 'Zahl der Bestellposten' + (' – B2B' if traffic_type == 'B2B' else '')
+        if expected_name in df.columns:
+            orders_col = expected_name
+        else:
+            df[expected_name] = 0
+            orders_col = expected_name
+    
+    # Für mobile_sessions_col
+    if mobile_sessions_col is None:
+        expected_name = 'Sitzungen – mobile App' + (' – B2B' if traffic_type == 'B2B' else '')
+        if expected_name in df.columns:
+            mobile_sessions_col = expected_name
+        else:
+            df[expected_name] = 0
+            mobile_sessions_col = expected_name
+    
+    # Für browser_sessions_col
+    if browser_sessions_col is None:
+        expected_name = 'Sitzungen – Browser' + (' – B2B' if traffic_type == 'B2B' else '')
+        if expected_name in df.columns:
+            browser_sessions_col = expected_name
+        else:
+            df[expected_name] = 0
+            browser_sessions_col = expected_name
+    
     # DEBUG: Zeige welche Spalten gefunden wurden
     debug_info = []
     debug_info.append(f"**Gefundene Spalten für {traffic_type} Traffic:**")
@@ -211,11 +263,122 @@ def aggregate_data(df, traffic_type='normal'):
     aggregated = df.groupby('Zeitraum').agg({
         units_col: 'sum',
         revenue_col: 'sum',
-        views_col: 'sum'
+        views_col: 'sum',
+        sessions_col: 'sum',
+        orders_col: 'sum',
+        mobile_sessions_col: 'sum',
+        browser_sessions_col: 'sum'
     }).reset_index()
     
-    aggregated.columns = ['Zeitraum', 'Bestellte Einheiten', 'Umsatz', 'Seitenaufrufe']
+    # Berechne zusätzliche KPIs (mit Division durch Null Schutz)
+    aggregated['Conversion Rate (%)'] = (
+        (aggregated[units_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    aggregated['AOV (€)'] = (
+        (aggregated[revenue_col] / aggregated[orders_col].replace(0, np.nan))
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    aggregated['Revenue per Session (€)'] = (
+        (aggregated[revenue_col] / aggregated[sessions_col].replace(0, np.nan))
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    
+    # Umbenennen der Spalten
+    aggregated.columns = [
+        'Zeitraum', 
+        'Bestellte Einheiten', 
+        'Umsatz', 
+        'Seitenaufrufe',
+        'Sitzungen',
+        'Bestellungen',
+        'Mobile Sitzungen',
+        'Browser Sitzungen',
+        'Conversion Rate (%)',
+        'AOV (€)',
+        'Revenue per Session (€)'
+    ]
+    
     return aggregated
+
+def get_top_flop_asins(df, traffic_type='normal'):
+    """Identifiziert Top- und Flop-ASINs basierend auf Umsatz"""
+    if traffic_type == 'B2B':
+        units_col = find_column(df, ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
+        revenue_col = find_column(df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
+        views_col = find_column(df, ['Seitenaufrufe – Summe – B2B', 'Seitenaufrufe - Summe - B2B'])
+        sessions_col = find_column(df, ['Sitzungen – Summe – B2B', 'Sitzungen - Summe - B2B'])
+        orders_col = find_column(df, ['Zahl der Bestellposten – B2B', 'Zahl der Bestellposten - B2B'])
+    else:
+        units_col = find_column(df, ['Bestellte Einheiten'])
+        revenue_col = find_column(df, ['Durch bestellte Produkte erzielter Umsatz'])
+        views_col = find_column(df, ['Seitenaufrufe – Summe', 'Seitenaufrufe - Summe'])
+        sessions_col = find_column(df, ['Sitzungen – Summe', 'Sitzungen - Summe'])
+        orders_col = find_column(df, ['Zahl der Bestellposten'])
+    
+    # Fallback falls Spalten nicht gefunden
+    if not all([units_col, revenue_col, views_col, sessions_col, orders_col]):
+        return None, None
+    
+    # Verwende untergeordnete ASINs
+    asin_column = '(Untergeordnete) ASIN'
+    if asin_column not in df.columns:
+        asin_column = '(Übergeordnete) ASIN'
+    
+    if asin_column not in df.columns:
+        return None, None
+    
+    # Aggregiere nach ASIN
+    asin_data = df.groupby(asin_column).agg({
+        units_col: 'sum',
+        revenue_col: 'sum',
+        views_col: 'sum',
+        sessions_col: 'sum',
+        orders_col: 'sum'
+    }).reset_index()
+    
+    # Berechne KPIs
+    asin_data['Conversion Rate (%)'] = (
+        (asin_data[units_col] / asin_data[sessions_col].replace(0, np.nan) * 100)
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    asin_data['AOV (€)'] = (
+        (asin_data[revenue_col] / asin_data[orders_col].replace(0, np.nan))
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    asin_data['Revenue per Session (€)'] = (
+        (asin_data[revenue_col] / asin_data[sessions_col].replace(0, np.nan))
+        .fillna(0)
+        .replace([np.inf, -np.inf], 0)
+    )
+    
+    # Sortiere nach Umsatz (absteigend)
+    asin_data = asin_data.sort_values(revenue_col, ascending=False)
+    
+    # Top ASIN (höchster Umsatz)
+    top_asins = asin_data.head(1).copy()
+    top_asins.columns = ['ASIN', 'Einheiten', 'Umsatz', 'Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Conversion Rate (%)', 'AOV (€)', 'Revenue per Session (€)']
+    
+    # Flop ASIN (niedrigster Umsatz, aber > 0)
+    # Filtere ASINs mit Umsatz > 0 und sortiere aufsteigend
+    asin_data_with_revenue = asin_data[asin_data[revenue_col] > 0].copy()
+    if len(asin_data_with_revenue) > 1:
+        # Sortiere aufsteigend für Flop
+        asin_data_with_revenue = asin_data_with_revenue.sort_values(revenue_col, ascending=True)
+        flop_asins = asin_data_with_revenue.head(1).copy()
+        flop_asins.columns = ['ASIN', 'Einheiten', 'Umsatz', 'Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Conversion Rate (%)', 'AOV (€)', 'Revenue per Session (€)']
+    elif len(asin_data_with_revenue) == 1:
+        # Nur ein ASIN mit Umsatz - das ist dann sowohl Top als auch Flop
+        flop_asins = None
+    else:
+        flop_asins = None
+    
+    return top_asins, flop_asins
 
 def generate_summary(current_data, previous_data, traffic_type='normal'):
     """Generiert eine Zusammenfassung der Änderungen"""
@@ -262,6 +425,36 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         summary_parts.append(f"❌ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gesunken ({views_change:.0f}, {views_pct:+.1f}%).")
     else:
         summary_parts.append(f"➡️ Die Seitenaufrufe sind unverändert bei {current['Seitenaufrufe']:.0f}.")
+    
+    # Conversion Rate
+    if 'Conversion Rate (%)' in current and 'Conversion Rate (%)' in previous:
+        cr_change = current['Conversion Rate (%)'] - previous['Conversion Rate (%)']
+        if cr_change > 0:
+            summary_parts.append(f"✅ Die Conversion Rate ist von {previous['Conversion Rate (%)']:.2f}% auf {current['Conversion Rate (%)']:.2f}% gestiegen (+{cr_change:.2f} Prozentpunkte).")
+        elif cr_change < 0:
+            summary_parts.append(f"❌ Die Conversion Rate ist von {previous['Conversion Rate (%)']:.2f}% auf {current['Conversion Rate (%)']:.2f}% gesunken ({cr_change:.2f} Prozentpunkte).")
+        else:
+            summary_parts.append(f"➡️ Die Conversion Rate ist unverändert bei {current['Conversion Rate (%)']:.2f}%.")
+    
+    # AOV
+    if 'AOV (€)' in current and 'AOV (€)' in previous:
+        aov_change = current['AOV (€)'] - previous['AOV (€)']
+        if aov_change > 0:
+            summary_parts.append(f"✅ Der Average Order Value ist von {previous['AOV (€)']:.2f} € auf {current['AOV (€)']:.2f} € gestiegen (+{aov_change:.2f} €).")
+        elif aov_change < 0:
+            summary_parts.append(f"❌ Der Average Order Value ist von {previous['AOV (€)']:.2f} € auf {current['AOV (€)']:.2f} € gesunken ({aov_change:.2f} €).")
+        else:
+            summary_parts.append(f"➡️ Der Average Order Value ist unverändert bei {current['AOV (€)']:.2f} €.")
+    
+    # Revenue per Session
+    if 'Revenue per Session (€)' in current and 'Revenue per Session (€)' in previous:
+        rps_change = current['Revenue per Session (€)'] - previous['Revenue per Session (€)']
+        if rps_change > 0:
+            summary_parts.append(f"✅ Der Revenue per Session ist von {previous['Revenue per Session (€)']:.2f} € auf {current['Revenue per Session (€)']:.2f} € gestiegen (+{rps_change:.2f} €).")
+        elif rps_change < 0:
+            summary_parts.append(f"❌ Der Revenue per Session ist von {previous['Revenue per Session (€)']:.2f} € auf {current['Revenue per Session (€)']:.2f} € gesunken ({rps_change:.2f} €).")
+        else:
+            summary_parts.append(f"➡️ Der Revenue per Session ist unverändert bei {current['Revenue per Session (€)']:.2f} €.")
     
     return "\n\n".join(summary_parts)
 
@@ -428,6 +621,106 @@ if uploaded_files:
         fig_combined.update_xaxes(title_text='Zeitraum', tickmode='linear', tick0=1, dtick=1)
         st.plotly_chart(fig_combined, use_container_width=True)
         
+        # Neue KPIs
+        st.subheader("📊 Zusätzliche KPIs")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            fig_cr = px.line(
+                aggregated_data,
+                x='Zeitraum_Nr',
+                y='Conversion Rate (%)',
+                title=f'Conversion Rate ({traffic_type})',
+                labels={'Conversion Rate (%)': 'Conversion Rate (%)', 'Zeitraum_Nr': 'Zeitraum'},
+                markers=True
+            )
+            fig_cr.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_cr.update_xaxes(title_text='Zeitraum')
+            fig_cr.update_traces(line_color='purple', marker_color='purple')
+            st.plotly_chart(fig_cr, use_container_width=True)
+        
+        with col2:
+            fig_aov = px.bar(
+                aggregated_data,
+                x='Zeitraum_Nr',
+                y='AOV (€)',
+                title=f'Average Order Value ({traffic_type})',
+                labels={'AOV (€)': 'AOV (€)', 'Zeitraum_Nr': 'Zeitraum'}
+            )
+            fig_aov.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_aov.update_xaxes(title_text='Zeitraum')
+            fig_aov.update_traces(marker_color='orange')
+            st.plotly_chart(fig_aov, use_container_width=True)
+        
+        with col3:
+            fig_rps = px.bar(
+                aggregated_data,
+                x='Zeitraum_Nr',
+                y='Revenue per Session (€)',
+                title=f'Revenue per Session ({traffic_type})',
+                labels={'Revenue per Session (€)': 'Revenue/Session (€)', 'Zeitraum_Nr': 'Zeitraum'}
+            )
+            fig_rps.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_rps.update_xaxes(title_text='Zeitraum')
+            fig_rps.update_traces(marker_color='teal')
+            st.plotly_chart(fig_rps, use_container_width=True)
+        
+        # Mobile vs Browser Performance
+        st.subheader("📱 Mobile vs Browser Performance")
+        
+        # Bereite Daten für Mobile vs Browser vor
+        mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
+        mobile_browser_data = mobile_browser_data.melt(
+            id_vars='Zeitraum_Nr',
+            value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
+            var_name='Gerät',
+            value_name='Sitzungen'
+        )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig_mobile_browser = px.bar(
+                mobile_browser_data,
+                x='Zeitraum_Nr',
+                y='Sitzungen',
+                color='Gerät',
+                title=f'Mobile vs Browser Sitzungen ({traffic_type})',
+                labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
+                color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
+            )
+            fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            fig_mobile_browser.update_xaxes(title_text='Zeitraum')
+            st.plotly_chart(fig_mobile_browser, use_container_width=True)
+        
+        with col2:
+            # Berechne Mobile vs Browser Anteil
+            mobile_browser_pct = aggregated_data.copy()
+            total_sessions = mobile_browser_pct['Mobile Sitzungen'] + mobile_browser_pct['Browser Sitzungen']
+            mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions * 100).fillna(0)
+            mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions * 100).fillna(0)
+            
+            mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
+                id_vars='Zeitraum_Nr',
+                value_vars=['Mobile %', 'Browser %'],
+                var_name='Gerät',
+                value_name='Anteil (%)'
+            )
+            
+            fig_mobile_browser_pct = px.bar(
+                mobile_browser_pct_data,
+                x='Zeitraum_Nr',
+                y='Anteil (%)',
+                color='Gerät',
+                title=f'Mobile vs Browser Anteil ({traffic_type})',
+                labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
+                color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
+            )
+            fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
+            fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
+            st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
+        
         # Zusammenfassung
         st.header("📝 Zusammenfassung")
         
@@ -440,6 +733,55 @@ if uploaded_files:
             summary = "Nur ein Zeitraum verfügbar. Lade weitere Dateien hoch, um Vergleiche zu sehen."
         
         st.markdown(summary)
+        
+        # Top- und Flop-ASINs
+        st.subheader("🏆 Top- und Flop-ASINs")
+        
+        # Verwende den aktuellsten Zeitraum für Top/Flop Analyse
+        latest_period = aggregated_data['Zeitraum'].iloc[-1] if len(aggregated_data) > 0 else None
+        if latest_period:
+            latest_df = filtered_df[filtered_df['Zeitraum'] == latest_period].copy()
+        else:
+            latest_df = filtered_df.copy()
+        
+        top_asins, flop_asins = get_top_flop_asins(latest_df, traffic_type_key)
+        
+        if top_asins is not None and len(top_asins) > 0:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 🟢 Top ASIN (nach Umsatz)")
+                row = top_asins.iloc[0]
+                with st.container():
+                    st.markdown(f"**{row['ASIN']}**")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                        st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                    with col_b:
+                        st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                        st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                    st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+            
+            with col2:
+                if flop_asins is not None and len(flop_asins) > 0:
+                    st.markdown("### 🔴 Flop ASIN (nach Umsatz)")
+                    row = flop_asins.iloc[0]
+                    with st.container():
+                        st.markdown(f"**{row['ASIN']}**")
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                            st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                        with col_b:
+                            st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                            st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                        st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+                else:
+                    st.markdown("### 🔴 Flop ASIN")
+                    st.info("Keine Flop-ASIN verfügbar (nur ein ASIN mit Umsatz vorhanden oder alle ASINs haben keinen Umsatz).")
+        else:
+            st.info("Top- und Flop-ASINs konnten nicht berechnet werden. Bitte überprüfe die Daten.")
         
         # Detaillierte Tabelle
         st.header("📋 Detaillierte Daten")
@@ -477,7 +819,7 @@ if uploaded_files:
         
         # Statistiken
         st.header("📊 Statistiken")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         
         # Finde die tatsächlichen Spaltennamen (mit flexibler Suche)
         units_col_stat = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
@@ -515,6 +857,16 @@ if uploaded_files:
             asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
             unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
             st.metric("Anzahl ASINs", f"{unique_asins}")
+        
+        with col5:
+            # Durchschnittliche Conversion Rate
+            avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
+            st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+        
+        with col6:
+            # Durchschnittlicher AOV
+            avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
+            st.metric("Ø AOV", f"{avg_aov:.2f} €")
     else:
         st.error("Keine Daten konnten geladen werden. Bitte überprüfe die CSV-Dateien.")
 else:
