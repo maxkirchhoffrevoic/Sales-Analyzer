@@ -114,6 +114,10 @@ def load_and_process_csv(uploaded_file, file_name):
     try:
         df = pd.read_csv(uploaded_file, encoding='utf-8')
         
+        # Entferne doppelte Spaltennamen (behalte die erste)
+        if df.columns.duplicated().any():
+            df = df.loc[:, ~df.columns.duplicated()]
+        
         # Prüfe ob es ein Account-Level Report ist (hat "Datum"-Spalte)
         is_account_level = 'Datum' in df.columns
         
@@ -356,6 +360,9 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     if is_account_level:
         # Daten sind bereits pro Zeitraum aggregiert
         aggregated = df.copy()
+        # Stelle sicher, dass keine doppelten Spaltennamen existieren
+        if aggregated.columns.duplicated().any():
+            aggregated = aggregated.loc[:, ~aggregated.columns.duplicated()]
         # Stelle sicher, dass alle benötigten Spalten vorhanden sind
         for col in [units_col, revenue_col, views_col, sessions_col, orders_col, mobile_sessions_col, browser_sessions_col]:
             if col not in aggregated.columns:
@@ -401,8 +408,8 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     )
     
     # Umbenennen der Spalten - nur die Spalten die tatsächlich vorhanden sind
+    # Erstelle Mapping ohne 'Zeitraum' (wird nicht umbenannt)
     column_mapping = {
-        'Zeitraum': 'Zeitraum',
         units_col: 'Bestellte Einheiten',
         revenue_col: 'Umsatz',
         views_col: 'Seitenaufrufe',
@@ -412,13 +419,22 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
         browser_sessions_col: 'Browser Sitzungen'
     }
     
-    # Benenne nur vorhandene Spalten um
+    # Prüfe auf doppelte Zielnamen und benenne nur um, wenn nötig
+    rename_dict = {}
     for old_name, new_name in column_mapping.items():
         if old_name in aggregated.columns and old_name != new_name:
-            aggregated = aggregated.rename(columns={old_name: new_name})
+            # Prüfe ob Zielname bereits existiert (aber nicht als die aktuelle Spalte)
+            if new_name not in aggregated.columns or aggregated.columns.get_loc(new_name) != aggregated.columns.get_loc(old_name):
+                rename_dict[old_name] = new_name
     
-    # Stelle sicher, dass die berechneten Spalten vorhanden sind
-    # (sie wurden bereits oben hinzugefügt)
+    # Führe Umbenennung in einem Schritt durch
+    if rename_dict:
+        aggregated = aggregated.rename(columns=rename_dict)
+    
+    # Stelle sicher, dass keine doppelten Spaltennamen existieren
+    if aggregated.columns.duplicated().any():
+        # Entferne doppelte Spalten (behalte die erste)
+        aggregated = aggregated.loc[:, ~aggregated.columns.duplicated()]
     
     return aggregated
 
@@ -985,10 +1001,36 @@ if uploaded_files:
         st.header("📝 Zusammenfassung")
         
         if len(aggregated_data) > 1:
-            # Vergleiche aktuellsten mit vorherigem Zeitraum
-            current_data = aggregated_data.tail(1)
-            previous_data = aggregated_data.head(len(aggregated_data) - 1)
-            summary = generate_summary(current_data, previous_data, traffic_type_key)
+            # Zeitraum-Auswahl für Vergleich
+            available_periods = aggregated_data['Zeitraum'].unique().tolist()
+            available_periods.sort()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                previous_period = st.selectbox(
+                    "Vergleichszeitraum (von)",
+                    available_periods,
+                    index=len(available_periods) - 2 if len(available_periods) > 1 else 0,
+                    help="Wählen Sie den ersten Zeitraum für den Vergleich"
+                )
+            
+            with col2:
+                current_period = st.selectbox(
+                    "Aktueller Zeitraum (zu)",
+                    available_periods,
+                    index=len(available_periods) - 1,
+                    help="Wählen Sie den zweiten Zeitraum für den Vergleich"
+                )
+            
+            # Filtere Daten für die ausgewählten Zeiträume
+            previous_data = aggregated_data[aggregated_data['Zeitraum'] == previous_period].copy()
+            current_data = aggregated_data[aggregated_data['Zeitraum'] == current_period].copy()
+            
+            if len(previous_data) > 0 and len(current_data) > 0:
+                summary = generate_summary(current_data, previous_data, traffic_type_key)
+            else:
+                summary = "Fehler beim Laden der Zeiträume. Bitte wählen Sie andere Zeiträume aus."
         else:
             summary = "Nur ein Zeitraum verfügbar. Lade weitere Dateien hoch, um Vergleiche zu sehen."
         
