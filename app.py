@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 # Seitenkonfiguration
@@ -396,11 +396,61 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
         .fillna(0)
         .replace([np.inf, -np.inf], 0)
     )
-    aggregated['AOV (€)'] = (
-        (aggregated[revenue_col] / aggregated[orders_col].replace(0, np.nan))
-        .fillna(0)
-        .replace([np.inf, -np.inf], 0)
-    )
+    
+    # AOV = Umsatz / Anzahl der Bestellposten
+    # Prüfe zuerst, ob bereits eine AOV-Spalte in den Originaldaten vorhanden ist
+    aov_col_name = 'Durchschnittlicher Umsatz/Bestellposten' if traffic_type == 'normal' else 'Durchschnittlicher Umsatz pro Bestellposten – B2B'
+    aov_col_alt = find_column(df, [aov_col_name, 'Durchschnittlicher Umsatz/Bestellposten', 'Durchschnittlicher Umsatz pro Bestellposten – B2B'])
+    
+    if aov_col_alt and aov_col_alt in df.columns:
+        # Wenn AOV-Spalte in Originaldaten vorhanden ist, verwende diese
+        # Aggregiere die AOV-Werte (gewichtet nach Anzahl der Bestellposten)
+        if is_account_level:
+            # Bei Account-Level: AOV ist bereits pro Zeitraum vorhanden
+            if aov_col_alt in aggregated.columns:
+                aggregated['AOV (€)'] = aggregated[aov_col_alt]
+            else:
+                # Fallback: Berechne aus Umsatz / Bestellposten
+                aggregated['AOV (€)'] = (
+                    (aggregated[revenue_col] / aggregated[orders_col].replace(0, np.nan))
+                    .fillna(0)
+                    .replace([np.inf, -np.inf], 0)
+                )
+        else:
+            # Bei ASIN-Level: Gewichteter Durchschnitt der AOV-Werte
+            # AOV gesamt = Summe(Umsatz) / Summe(Bestellposten)
+            aggregated['AOV (€)'] = (
+                (aggregated[revenue_col] / aggregated[orders_col].replace(0, np.nan))
+                .fillna(0)
+                .replace([np.inf, -np.inf], 0)
+            )
+    else:
+        # Berechne AOV aus Umsatz / Anzahl der Bestellposten
+        aggregated['AOV (€)'] = (
+            (aggregated[revenue_col] / aggregated[orders_col].replace(0, np.nan))
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
+    
+    # Debug: Zeige welche Spalten für AOV verwendet werden
+    with st.expander("🔍 Debug: AOV-Berechnung", expanded=False):
+        st.write(f"**Verwendete Spalten für AOV:**")
+        st.write(f"- Umsatz-Spalte: `{revenue_col}`")
+        st.write(f"- Bestellposten-Spalte: `{orders_col}`")
+        if aov_col_alt:
+            st.write(f"- Gefundene AOV-Spalte in Originaldaten: `{aov_col_alt}` (wird nicht verwendet, da gewichteter Durchschnitt benötigt wird)")
+        if orders_col in aggregated.columns:
+            st.write(f"- Beispielwerte aus `{orders_col}`: {aggregated[orders_col].head(3).tolist()}")
+        if revenue_col in aggregated.columns:
+            st.write(f"- Beispielwerte aus `{revenue_col}`: {aggregated[revenue_col].head(3).tolist()}")
+        if 'AOV (€)' in aggregated.columns:
+            st.write(f"- Berechnete AOV-Werte: {aggregated['AOV (€)'].head(3).tolist()}")
+            if len(aggregated) > 0:
+                sample_idx = 0
+                if orders_col in aggregated.columns and aggregated[orders_col].iloc[sample_idx] != 0:
+                    manual_calc = aggregated[revenue_col].iloc[sample_idx] / aggregated[orders_col].iloc[sample_idx]
+                    st.write(f"- Manuelle Prüfung (Zeile 0): {aggregated[revenue_col].iloc[sample_idx]:.2f} € / {aggregated[orders_col].iloc[sample_idx]:.0f} = {manual_calc:.2f} €")
+                    st.write(f"- Tatsächlicher berechneter Wert: {aggregated['AOV (€)'].iloc[sample_idx]:.2f} €")
     aggregated['Revenue per Session (€)'] = (
         (aggregated[revenue_col] / aggregated[sessions_col].replace(0, np.nan))
         .fillna(0)
@@ -435,6 +485,97 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     if aggregated.columns.duplicated().any():
         # Entferne doppelte Spalten (behalte die erste)
         aggregated = aggregated.loc[:, ~aggregated.columns.duplicated()]
+    
+    return aggregated
+
+def aggregate_by_period(df, period='week'):
+    """Aggregiert Daten nach Zeitraum (Woche, Monat, YTD)"""
+    if 'Zeitraum' not in df.columns:
+        return df
+    
+    # Konvertiere Zeitraum zu Datetime
+    df = df.copy()
+    df['Zeitraum_DT'] = pd.to_datetime(df['Zeitraum'], errors='coerce')
+    df = df.dropna(subset=['Zeitraum_DT'])
+    
+    if len(df) == 0:
+        return df
+    
+    if period == 'week':
+        # Aggregiere nach Woche (Jahr-Kalenderwoche)
+        df['Zeitraum_Agg'] = df['Zeitraum_DT'].dt.to_period('W').astype(str)
+    elif period == 'month':
+        # Aggregiere nach Monat (Jahr-Monat)
+        df['Zeitraum_Agg'] = df['Zeitraum_DT'].dt.to_period('M').astype(str)
+    elif period == 'ytd':
+        # Year-to-Date: Gruppiere nach Jahr
+        df['Jahr'] = df['Zeitraum_DT'].dt.year
+        df['Zeitraum_Agg'] = df['Jahr'].astype(str) + ' (YTD)'
+    else:
+        # Fallback: Keine Aggregation (sollte nicht vorkommen, da Tag entfernt wurde)
+        df['Zeitraum_Agg'] = df['Zeitraum_DT'].dt.strftime('%Y-%m-%d')
+    
+    # Identifiziere Spalten die NICHT summiert werden sollen (sondern neu berechnet)
+    # AOV und Conversion Rate müssen neu berechnet werden, nicht summiert
+    exclude_from_sum = ['AOV (€)', 'Conversion Rate (%)', 'Revenue per Session (€)', 'Zeitraum_DT', 'Zeitraum_Nr']
+    if 'Jahr' in df.columns:
+        exclude_from_sum.append('Jahr')
+    
+    # Numerische Spalten für Aggregation identifizieren
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    # Entferne Spalten die nicht summiert werden sollen
+    numeric_cols = [col for col in numeric_cols if col not in exclude_from_sum]
+    
+    # Gruppiere und aggregiere (nur Spalten die summiert werden sollen)
+    agg_dict = {col: 'sum' for col in numeric_cols if col in df.columns}
+    agg_dict['Zeitraum_DT'] = 'first'  # Behalte erstes Datum für Sortierung
+    
+    aggregated = df.groupby('Zeitraum_Agg', as_index=False).agg(agg_dict)
+    
+    # Sortiere nach Datum
+    aggregated = aggregated.sort_values('Zeitraum_DT')
+    aggregated['Zeitraum'] = aggregated['Zeitraum_Agg']
+    aggregated = aggregated.drop(columns=['Zeitraum_DT', 'Zeitraum_Agg'])
+    
+    # Entferne temporäre Spalten
+    if 'Zeitraum_DT' in aggregated.columns:
+        aggregated = aggregated.drop(columns=['Zeitraum_DT'])
+    if 'Zeitraum_Agg' in aggregated.columns:
+        aggregated = aggregated.drop(columns=['Zeitraum_Agg'])
+    
+    # Berechne AOV, Conversion Rate und Revenue per Session NEU für aggregierte Zeiträume
+    # Diese müssen aus den aggregierten Basiswerten neu berechnet werden, nicht summiert werden
+    
+    # Finde die Basis-Spalten für die Berechnung
+    # Diese sollten bereits in aggregated vorhanden sein (wurden summiert)
+    units_col_agg = 'Bestellte Einheiten' if 'Bestellte Einheiten' in aggregated.columns else None
+    revenue_col_agg = 'Umsatz' if 'Umsatz' in aggregated.columns else None
+    sessions_col_agg = 'Sitzungen' if 'Sitzungen' in aggregated.columns else None
+    orders_col_agg = 'Bestellungen' if 'Bestellungen' in aggregated.columns else None
+    
+    # Conversion Rate = (Bestellte Einheiten / Sitzungen) * 100
+    if units_col_agg and sessions_col_agg:
+        aggregated['Conversion Rate (%)'] = (
+            (aggregated[units_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan) * 100)
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
+    
+    # AOV = Umsatz / Anzahl der Bestellposten
+    if revenue_col_agg and orders_col_agg:
+        aggregated['AOV (€)'] = (
+            (aggregated[revenue_col_agg] / aggregated[orders_col_agg].replace(0, np.nan))
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
+    
+    # Revenue per Session = Umsatz / Sitzungen
+    if revenue_col_agg and sessions_col_agg:
+        aggregated['Revenue per Session (€)'] = (
+            (aggregated[revenue_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan))
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
     
     return aggregated
 
@@ -703,6 +844,99 @@ if uploaded_files:
         
         # Aggregiere Daten
         aggregated_data = aggregate_data(filtered_df, traffic_type_key, is_account_level=is_account_level)
+        
+        # Prüfe ob Daten auf Tagesebene sind
+        # Versuche Zeiträume zu parsen und prüfe ob es Tagesdaten sind
+        try:
+            periods_as_dates = pd.to_datetime(aggregated_data['Zeitraum'], errors='coerce')
+            valid_dates = periods_as_dates.dropna()
+            if len(valid_dates) > 0:
+                # Prüfe ob Zeiträume tägliche Unterschiede haben
+                date_diffs = valid_dates.diff().dropna()
+                # Wenn die meisten Unterschiede 1 Tag sind, sind es Tagesdaten
+                daily_diffs = (date_diffs == pd.Timedelta(days=1)).sum()
+                is_daily_data = len(date_diffs) > 0 and (daily_diffs / len(date_diffs)) > 0.5
+            else:
+                is_daily_data = False
+        except:
+            is_daily_data = False
+        
+        # Aggregationsebene-Auswahl
+        if is_daily_data:
+            st.sidebar.subheader("📅 Aggregationsebene")
+            aggregation_level = st.sidebar.radio(
+                "Zeitraum-Aggregation",
+                ['Woche', 'Monat', 'YTD'],
+                index=0,
+                help="Wählen Sie, auf welcher Ebene die Daten angezeigt werden sollen"
+            )
+            
+            # Konvertiere Auswahl zu Period-Key
+            period_map = {'Woche': 'week', 'Monat': 'month', 'YTD': 'ytd'}
+            period_key = period_map[aggregation_level]
+        else:
+            aggregation_level = None
+            period_key = 'week'
+        
+        # Aggregiere Daten nach gewählter Ebene (vor Jahr-Filterung)
+        if is_daily_data:
+            aggregated_data = aggregate_by_period(aggregated_data, period=period_key)
+        
+        # Jahr-Auswahl (wenn mehrere Jahre vorhanden)
+        if 'Zeitraum' in aggregated_data.columns:
+            if period_key == 'ytd':
+                # Bei YTD sind Jahre bereits im Zeitraum-String (z.B. "2024 (YTD)")
+                # Extrahiere Jahre aus Zeitraum-Strings
+                available_years = []
+                for period_str in aggregated_data['Zeitraum'].unique():
+                    year_match = re.search(r'(\d{4})\s*\(YTD\)', str(period_str))
+                    if year_match:
+                        available_years.append(int(year_match.group(1)))
+                available_years = sorted(list(set(available_years)))
+            else:
+                # Extrahiere Jahre aus Zeiträumen
+                # Verwende Regex, um Jahre aus allen Zeitraum-Formaten zu extrahieren
+                # (funktioniert für Datumsangaben, Wochen, Monate, etc.)
+                available_years = []
+                for period_str in aggregated_data['Zeitraum'].unique():
+                    # Versuche Jahr aus verschiedenen Formaten zu extrahieren
+                    year_match = re.search(r'(\d{4})', str(period_str))
+                    if year_match:
+                        available_years.append(int(year_match.group(1)))
+                available_years = sorted(list(set(available_years)))
+                
+                # Erstelle Jahr_Extracted Spalte für Filterung
+                aggregated_data['Jahr_Extracted'] = aggregated_data['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(float)
+            
+            if len(available_years) > 1:
+                st.sidebar.subheader("📆 Jahr-Auswahl")
+                selected_year = st.sidebar.selectbox(
+                    "Jahr filtern",
+                    ['Alle Jahre'] + [str(y) for y in available_years],
+                    index=0,
+                    help="Wählen Sie ein Jahr, um nur Daten dieses Jahres anzuzeigen"
+                )
+                
+                if selected_year != 'Alle Jahre':
+                    year_filter = int(selected_year)
+                    if period_key == 'ytd':
+                        # Filtere nach Jahr im Zeitraum-String
+                        aggregated_data = aggregated_data[
+                            aggregated_data['Zeitraum'].str.contains(str(year_filter), na=False)
+                        ].copy()
+                    else:
+                        # Filtere nach extrahiertem Jahr
+                        if 'Jahr_Extracted' in aggregated_data.columns:
+                            aggregated_data = aggregated_data[aggregated_data['Jahr_Extracted'] == year_filter].copy()
+                        else:
+                            # Fallback: Filtere nach String-Match
+                            aggregated_data = aggregated_data[
+                                aggregated_data['Zeitraum'].str.contains(str(year_filter), na=False)
+                            ].copy()
+            
+            # Entferne temporäre Spalte
+            if 'Jahr_Extracted' in aggregated_data.columns:
+                aggregated_data = aggregated_data.drop(columns=['Jahr_Extracted'])
         
         # Erstelle numerische Zeitraum-IDs für die X-Achse
         aggregated_data = aggregated_data.copy()
