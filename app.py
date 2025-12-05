@@ -30,6 +30,39 @@ st.markdown("""
 """)
 
 # Hilfsfunktionen
+def format_number_de(value, decimals=0):
+    """Formatiert Zahlen im deutschen Format (Punkt als Tausender, Komma als Dezimal)
+    
+    Args:
+        value: Zahl (int oder float)
+        decimals: Anzahl der Dezimalstellen (Standard: 0)
+    
+    Returns:
+        Formatierter String (z.B. "16.104,81" für 16104.81 mit decimals=2)
+    """
+    if pd.isna(value) or value is None:
+        return "0" if decimals == 0 else "0," + "0" * decimals
+    
+    # Konvertiere zu float
+    num = float(value)
+    
+    # Formatiere mit Komma als Dezimaltrennzeichen
+    if decimals == 0:
+        # Ganze Zahl: Tausenderpunkte
+        return f"{int(num):,}".replace(",", ".")
+    else:
+        # Dezimalzahl: Tausenderpunkte und Komma als Dezimaltrennzeichen
+        formatted = f"{num:,.{decimals}f}"
+        # Ersetze Komma durch temporären Platzhalter, dann Punkt durch Komma, dann Platzhalter durch Punkt
+        parts = formatted.split(".")
+        if len(parts) == 2:
+            integer_part = parts[0].replace(",", ".")
+            decimal_part = parts[1]
+            return f"{integer_part},{decimal_part}"
+        else:
+            # Fallback falls Formatierung nicht wie erwartet
+            return formatted.replace(".", ",")
+
 def parse_euro_value(value):
     """Konvertiert Euro-Strings (z.B. '1.999,55 €' oder '368,14 €') zu Float"""
     if pd.isna(value) or value == '':
@@ -1018,72 +1051,74 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         units_change = current[units_col_name] - previous[units_col_name]
         units_pct = ((current[units_col_name] / previous[units_col_name] - 1) * 100) if previous[units_col_name] > 0 else 0
         if units_change > 0:
-            summary_parts.append(f"**✅ Bestellte Einheiten:** {previous[units_col_name]:.0f} → **{current[units_col_name]:.0f}** | **+{units_change:.0f}** ({units_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **+{format_number_de(units_change, 0)}** ({units_pct:+.1f}%)")
         elif units_change < 0:
-            summary_parts.append(f"**❌ Bestellte Einheiten:** {previous[units_col_name]:.0f} → **{current[units_col_name]:.0f}** | **{units_change:.0f}** ({units_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **{format_number_de(units_change, 0)}** ({units_pct:+.1f}%)")
         else:
-            summary_parts.append(f"**➡️ Bestellte Einheiten:** **{current[units_col_name]:.0f}** (unverändert)")
+            summary_parts.append(f"**➡️ Bestellte Einheiten:** **{format_number_de(current[units_col_name], 0)}** (unverändert)")
     
     # Umsatz
     revenue_change = current['Umsatz'] - previous['Umsatz']
     revenue_pct = ((current['Umsatz'] / previous['Umsatz'] - 1) * 100) if previous['Umsatz'] > 0 else 0
     if revenue_change > 0:
-        summary_parts.append(f"**✅ Umsatz:** {previous['Umsatz']:,.2f} € → **{current['Umsatz']:,.2f} €** | **+{revenue_change:,.2f} €** ({revenue_pct:+.1f}%)")
+        summary_parts.append(f"**✅ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **+{format_number_de(revenue_change, 2)} €** ({revenue_pct:+.1f}%)")
     elif revenue_change < 0:
-        summary_parts.append(f"**❌ Umsatz:** {previous['Umsatz']:,.2f} € → **{current['Umsatz']:,.2f} €** | **{revenue_change:,.2f} €** ({revenue_pct:+.1f}%)")
+        summary_parts.append(f"**❌ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **{format_number_de(revenue_change, 2)} €** ({revenue_pct:+.1f}%)")
     else:
-        summary_parts.append(f"**➡️ Umsatz:** **{current['Umsatz']:,.2f} €** (unverändert)")
+        summary_parts.append(f"**➡️ Umsatz:** **{format_number_de(current['Umsatz'], 2)} €** (unverändert)")
     
     # Seitenaufrufe (nur wenn verfügbar)
     if 'Seitenaufrufe' in current and 'Seitenaufrufe' in previous:
         views_change = current['Seitenaufrufe'] - previous['Seitenaufrufe']
         views_pct = ((current['Seitenaufrufe'] / previous['Seitenaufrufe'] - 1) * 100) if previous['Seitenaufrufe'] > 0 else 0
         if views_change > 0:
-            summary_parts.append(f"**✅ Seitenaufrufe:** {previous['Seitenaufrufe']:.0f} → **{current['Seitenaufrufe']:.0f}** | **+{views_change:.0f}** ({views_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **+{format_number_de(views_change, 0)}** ({views_pct:+.1f}%)")
         elif views_change < 0:
-            summary_parts.append(f"**❌ Seitenaufrufe:** {previous['Seitenaufrufe']:.0f} → **{current['Seitenaufrufe']:.0f}** | **{views_change:.0f}** ({views_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **{format_number_de(views_change, 0)}** ({views_pct:+.1f}%)")
         else:
-            summary_parts.append(f"**➡️ Seitenaufrufe:** **{current['Seitenaufrufe']:.0f}** (unverändert)")
+            summary_parts.append(f"**➡️ Seitenaufrufe:** **{format_number_de(current['Seitenaufrufe'], 0)}** (unverändert)")
     elif 'Sitzungen' in current and 'Sitzungen' in previous:
         # Falls keine Seitenaufrufe, verwende Sitzungen
         sessions_change = current['Sitzungen'] - previous['Sitzungen']
         sessions_pct = ((current['Sitzungen'] / previous['Sitzungen'] - 1) * 100) if previous['Sitzungen'] > 0 else 0
         if sessions_change > 0:
-            summary_parts.append(f"**✅ Sitzungen:** {previous['Sitzungen']:.0f} → **{current['Sitzungen']:.0f}** | **+{sessions_change:.0f}** ({sessions_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **+{format_number_de(sessions_change, 0)}** ({sessions_pct:+.1f}%)")
         elif sessions_change < 0:
-            summary_parts.append(f"**❌ Sitzungen:** {previous['Sitzungen']:.0f} → **{current['Sitzungen']:.0f}** | **{sessions_change:.0f}** ({sessions_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **{format_number_de(sessions_change, 0)}** ({sessions_pct:+.1f}%)")
         else:
-            summary_parts.append(f"**➡️ Sitzungen:** **{current['Sitzungen']:.0f}** (unverändert)")
+            summary_parts.append(f"**➡️ Sitzungen:** **{format_number_de(current['Sitzungen'], 0)}** (unverändert)")
     
     # Conversion Rate
     if 'Conversion Rate (%)' in current and 'Conversion Rate (%)' in previous:
         cr_change = current['Conversion Rate (%)'] - previous['Conversion Rate (%)']
         if cr_change > 0:
-            summary_parts.append(f"**✅ Conversion Rate:** {previous['Conversion Rate (%)']:.2f}% → **{current['Conversion Rate (%)']:.2f}%** | **+{cr_change:.2f} PP**")
+            summary_parts.append(f"**✅ Conversion Rate:** {format_number_de(previous['Conversion Rate (%)'], 2)}% → **{format_number_de(current['Conversion Rate (%)'], 2)}%** | **+{format_number_de(cr_change, 2)} PP**")
         elif cr_change < 0:
-            summary_parts.append(f"**❌ Conversion Rate:** {previous['Conversion Rate (%)']:.2f}% → **{current['Conversion Rate (%)']:.2f}%** | **{cr_change:.2f} PP**")
+            summary_parts.append(f"**❌ Conversion Rate:** {format_number_de(previous['Conversion Rate (%)'], 2)}% → **{format_number_de(current['Conversion Rate (%)'], 2)}%** | **{format_number_de(cr_change, 2)} PP**")
         else:
-            summary_parts.append(f"**➡️ Conversion Rate:** **{current['Conversion Rate (%)']:.2f}%** (unverändert)")
+            summary_parts.append(f"**➡️ Conversion Rate:** **{format_number_de(current['Conversion Rate (%)'], 2)}%** (unverändert)")
     
     # AOV
     if 'AOV (€)' in current and 'AOV (€)' in previous:
         aov_change = current['AOV (€)'] - previous['AOV (€)']
+        aov_pct = ((current['AOV (€)'] / previous['AOV (€)'] - 1) * 100) if previous['AOV (€)'] > 0 else 0
         if aov_change > 0:
-            summary_parts.append(f"**✅ AOV:** {previous['AOV (€)']:.2f} € → **{current['AOV (€)']:.2f} €** | **+{aov_change:.2f} €**")
+            summary_parts.append(f"**✅ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **+{format_number_de(aov_change, 2)} €** ({aov_pct:+.1f}%)")
         elif aov_change < 0:
-            summary_parts.append(f"**❌ AOV:** {previous['AOV (€)']:.2f} € → **{current['AOV (€)']:.2f} €** | **{aov_change:.2f} €**")
+            summary_parts.append(f"**❌ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **{format_number_de(aov_change, 2)} €** ({aov_pct:+.1f}%)")
         else:
-            summary_parts.append(f"**➡️ AOV:** **{current['AOV (€)']:.2f} €** (unverändert)")
+            summary_parts.append(f"**➡️ AOV:** **{format_number_de(current['AOV (€)'], 2)} €** (unverändert)")
     
     # Revenue per Session
     if 'Revenue per Session (€)' in current and 'Revenue per Session (€)' in previous:
         rps_change = current['Revenue per Session (€)'] - previous['Revenue per Session (€)']
+        rps_pct = ((current['Revenue per Session (€)'] / previous['Revenue per Session (€)'] - 1) * 100) if previous['Revenue per Session (€)'] > 0 else 0
         if rps_change > 0:
-            summary_parts.append(f"**✅ Revenue per Session:** {previous['Revenue per Session (€)']:.2f} € → **{current['Revenue per Session (€)']:.2f} €** | **+{rps_change:.2f} €**")
+            summary_parts.append(f"**✅ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **+{format_number_de(rps_change, 2)} €** ({rps_pct:+.1f}%)")
         elif rps_change < 0:
-            summary_parts.append(f"**❌ Revenue per Session:** {previous['Revenue per Session (€)']:.2f} € → **{current['Revenue per Session (€)']:.2f} €** | **{rps_change:.2f} €**")
+            summary_parts.append(f"**❌ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **{format_number_de(rps_change, 2)} €** ({rps_pct:+.1f}%)")
         else:
-            summary_parts.append(f"**➡️ Revenue per Session:** **{current['Revenue per Session (€)']:.2f} €** (unverändert)")
+            summary_parts.append(f"**➡️ Revenue per Session:** **{format_number_de(current['Revenue per Session (€)'], 2)} €** (unverändert)")
     
     return "\n\n".join(summary_parts)
 
@@ -1354,7 +1389,7 @@ if uploaded_files:
                     total_units = units_numeric.sum()
                 else:
                     total_units = 0
-                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+                st.metric("Gesamt bestellte Einheiten", format_number_de(total_units, 0))
             
             with col2:
                 if revenue_col_stat and revenue_col_stat in filtered_df.columns:
@@ -1362,16 +1397,16 @@ if uploaded_files:
                     total_revenue = revenue_numeric.sum()
                 else:
                     total_revenue = normal_data_combined['Umsatz'].sum() if 'Umsatz' in normal_data_combined.columns else 0
-                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+                st.metric("Gesamtumsatz", f"{format_number_de(total_revenue, 2)} €")
             
             with col3:
                 if views_col_stat and views_col_stat in filtered_df.columns:
                     views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
                     total_views = views_numeric.sum()
-                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
                 else:
                     total_views = normal_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in normal_data_combined.columns else (normal_data_combined['Sitzungen'].sum() if 'Sitzungen' in normal_data_combined.columns else 0)
-                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
             
             with col4:
                 asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
@@ -1388,11 +1423,11 @@ if uploaded_files:
                     avg_cr = normal_data_combined['Conversion Rate (%)'].mean()
                 else:
                     avg_cr = 0
-                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+                st.metric("Ø Conversion Rate", f"{format_number_de(avg_cr, 2)}%")
             
             with col6:
                 avg_aov = normal_data_combined['AOV (€)'].mean() if 'AOV (€)' in normal_data_combined.columns else 0
-                st.metric("Ø AOV", f"{avg_aov:.2f} €")
+                st.metric("Ø AOV", f"{format_number_de(avg_aov, 2)} €")
             
             st.subheader("B2B Traffic")
             col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -1453,7 +1488,7 @@ if uploaded_files:
                         units_numeric = filtered_df[units_col_stat_b2b].apply(parse_numeric_value)
                         total_units = units_numeric.sum()
                 
-                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+                st.metric("Gesamt bestellte Einheiten", format_number_de(total_units, 0))
             
             with col2:
                 if revenue_col_stat_b2b and revenue_col_stat_b2b in filtered_df.columns:
@@ -1461,16 +1496,16 @@ if uploaded_files:
                     total_revenue = revenue_numeric.sum()
                 else:
                     total_revenue = b2b_data_combined['Umsatz'].sum() if 'Umsatz' in b2b_data_combined.columns else 0
-                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+                st.metric("Gesamtumsatz", f"{format_number_de(total_revenue, 2)} €")
             
             with col3:
                 if views_col_stat_b2b and views_col_stat_b2b in filtered_df.columns:
                     views_numeric = filtered_df[views_col_stat_b2b].apply(parse_numeric_value)
                     total_views = views_numeric.sum()
-                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
                 else:
                     total_views = b2b_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in b2b_data_combined.columns else (b2b_data_combined['Sitzungen'].sum() if 'Sitzungen' in b2b_data_combined.columns else 0)
-                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
             
             with col4:
                 asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
@@ -1487,11 +1522,11 @@ if uploaded_files:
                     avg_cr = b2b_data_combined['Conversion Rate (%)'].mean()
                 else:
                     avg_cr = 0
-                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+                st.metric("Ø Conversion Rate", f"{format_number_de(avg_cr, 2)}%")
             
             with col6:
                 avg_aov = b2b_data_combined['AOV (€)'].mean() if 'AOV (€)' in b2b_data_combined.columns else 0
-                st.metric("Ø AOV", f"{avg_aov:.2f} €")
+                st.metric("Ø AOV", f"{format_number_de(avg_aov, 2)} €")
         else:
             # Normale Ansicht (ein Traffic-Typ)
             col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -1559,7 +1594,7 @@ if uploaded_files:
                         units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
                         total_units = units_numeric.sum()
                 
-                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+                st.metric("Gesamt bestellte Einheiten", format_number_de(total_units, 0))
             
             with col2:
                 if revenue_col_stat and revenue_col_stat in filtered_df.columns:
@@ -1567,7 +1602,7 @@ if uploaded_files:
                     total_revenue = revenue_numeric.sum()
                 else:
                     total_revenue = 0
-                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+                st.metric("Gesamtumsatz", f"{format_number_de(total_revenue, 2)} €")
             
             with col3:
                 # Seitenaufrufe oder Sitzungen
@@ -1576,17 +1611,17 @@ if uploaded_files:
                     views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
                     total_views = views_numeric.sum()
                     if total_views > 0:
-                        st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                        st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
                     elif 'Sitzungen – Summe' in filtered_df.columns:
                         sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
                         total_sessions = sessions_numeric.sum()
-                        st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
+                        st.metric("Gesamt Sitzungen", format_number_de(total_sessions, 0))
                     else:
                         st.metric("Gesamt Seitenaufrufe", "N/A")
                 elif 'Sitzungen – Summe' in filtered_df.columns:
                     sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
                     total_sessions = sessions_numeric.sum()
-                    st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
+                    st.metric("Gesamt Sitzungen", format_number_de(total_sessions, 0))
                 else:
                     st.metric("Gesamt Seitenaufrufe", "N/A")
             
@@ -1598,12 +1633,12 @@ if uploaded_files:
             with col5:
                 # Durchschnittliche Conversion Rate
                 avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
-                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+                st.metric("Ø Conversion Rate", f"{format_number_de(avg_cr, 2)}%")
             
             with col6:
                 # Durchschnittlicher AOV
                 avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
-                st.metric("Ø AOV", f"{avg_aov:.2f} €")
+                st.metric("Ø AOV", f"{format_number_de(avg_aov, 2)} €")
         
         st.divider()
         
@@ -2095,11 +2130,11 @@ if uploaded_files:
                             st.markdown(f"**{row['ASIN']}**")
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                                st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                                st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                             with col_b:
-                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                                st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                                st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
                     else:
                         st.info("Keine Daten verfügbar")
                 
@@ -2111,11 +2146,11 @@ if uploaded_files:
                             st.markdown(f"**{row['ASIN']}**")
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                                st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                                st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                             with col_b:
-                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                                st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                                st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
                     else:
                         st.info("Keine Daten verfügbar")
                 
@@ -2131,11 +2166,11 @@ if uploaded_files:
                             st.markdown(f"**{row['ASIN']}**")
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                                st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                                st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                             with col_b:
-                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                                st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                                st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
                     else:
                         st.info("Keine Daten verfügbar")
                 
@@ -2147,11 +2182,11 @@ if uploaded_files:
                             st.markdown(f"**{row['ASIN']}**")
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                                st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                                st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                             with col_b:
-                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                                st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                                st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
                     else:
                         st.info("Keine Daten verfügbar")
                 
@@ -2171,12 +2206,12 @@ if uploaded_files:
                         st.markdown(f"**{row['ASIN']}**")
                         col_a, col_b = st.columns(2)
                         with col_a:
-                            st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                            st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                            st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                         with col_b:
-                            st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                            st.metric("AOV", f"{row['AOV (€)']:.2f} €")
-                        st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+                            st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                            st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
+                        st.caption(f"Revenue/Session: {format_number_de(row['Revenue per Session (€)'], 2)} € | Sitzungen: {format_number_de(row['Sitzungen'], 0)} | Seitenaufrufe: {format_number_de(row['Seitenaufrufe'], 0)}")
                 
                 with col2:
                     if flop_asins is not None and len(flop_asins) > 0:
@@ -2186,12 +2221,12 @@ if uploaded_files:
                             st.markdown(f"**{row['ASIN']}**")
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
-                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                                st.metric("Umsatz", f"{format_number_de(row['Umsatz'], 2)} €")
+                                st.metric("Einheiten", format_number_de(row['Einheiten'], 0))
                             with col_b:
-                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
-                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
-                            st.caption(f"Revenue/Session: {row['Revenue per Session (€)']:.2f} € | Sitzungen: {row['Sitzungen']:.0f} | Seitenaufrufe: {row['Seitenaufrufe']:.0f}")
+                                st.metric("Conversion Rate", f"{format_number_de(row['Conversion Rate (%)'], 2)}%")
+                                st.metric("AOV", f"{format_number_de(row['AOV (€)'], 2)} €")
+                            st.caption(f"Revenue/Session: {format_number_de(row['Revenue per Session (€)'], 2)} € | Sitzungen: {format_number_de(row['Sitzungen'], 0)} | Seitenaufrufe: {format_number_de(row['Seitenaufrufe'], 0)}")
                     else:
                         st.markdown("### 🔴 Flop ASIN")
                         st.info("Keine Flop-ASIN verfügbar (nur ein ASIN mit Umsatz vorhanden oder alle ASINs haben keinen Umsatz).")
