@@ -17,6 +17,17 @@ st.set_page_config(
 # Titel
 st.title("📊 Amazon Business Report Analyzer")
 st.markdown("Analysiere deine Amazon Business Reports für Detailseite Verkäufe und Traffic")
+st.markdown("""
+**So bereitet ihr euren Business Report für den Upload vor:**
+
+1. Navigiert zu **Berichte > Statistiken & Berichte** in eurem Amazon Seller Central
+2. Wählt auf der linken Seite den Bericht **Verkäufe und Traffic** unter **"Nach Datum"** aus
+3. Setzt in den Filtern folgende Einstellungen:
+   - **Anzeigen:** Nach Tag
+   - **Zeitraum:** Euren benutzerdefinierten Zeitraum
+   - **Dashboard Aufrufe:** Alle Spalten
+4. Ladet den Bericht herunter und fügt ihn hier ein
+""")
 
 # Hilfsfunktionen
 def parse_euro_value(value):
@@ -194,6 +205,9 @@ def find_column(df, possible_names):
         if name in df.columns:
             return name
     
+    # Prüfe ob es eine B2B-Suche ist (wenn "B2B" in einem der möglichen Namen enthalten ist)
+    is_b2b_search = any('b2b' in name.lower() for name in possible_names)
+    
     # Falls keine exakte Übereinstimmung, suche nach ähnlichen Namen (normalisiert)
     # Normalisiere alle Spaltennamen und Suchbegriffe
     normalized_columns = {col.strip().replace('–', '-').replace('—', '-').replace(' ', '').lower(): col for col in df.columns}
@@ -208,27 +222,109 @@ def find_column(df, possible_names):
         name_keywords = name.lower().split()
         for col in df.columns:
             col_lower = col.lower()
+            # Bei B2B-Suche: Stelle sicher, dass "b2b" auch im Spaltennamen enthalten ist
+            if is_b2b_search and 'b2b' not in col_lower:
+                continue
+            # Bei B2B-Suche: Stelle sicher, dass normale Spalten (ohne B2B) nicht gefunden werden
+            if is_b2b_search and 'bestellte' in col_lower and 'einheiten' in col_lower and 'b2b' not in col_lower:
+                continue
             # Prüfe ob alle wichtigen Keywords in Spaltenname enthalten sind
             if all(keyword in col_lower for keyword in name_keywords if len(keyword) > 2):
                 return col
     
     return None
 
+def find_b2b_units_column(df):
+    """Findet die B2B-Einheiten-Spalte, berücksichtigt auch Non-Breaking Spaces (\xa0)"""
+    for col in df.columns:
+        if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+            # Prüfe ob es wirklich die B2B-Spalte ist (nicht die normale)
+            if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                return col
+    return None
+
+def find_cr_column(df, traffic_type='normal'):
+    """Findet die Conversion Rate Spalte, berücksichtigt auch Non-Breaking Spaces (\xa0)"""
+    if traffic_type == 'B2B':
+        # Suche nach B2B Conversion Rate Spalte (mit Non-Breaking Space)
+        for col in df.columns:
+            col_lower = col.lower()
+            if 'bestellposten' in col_lower and 'sitzung' in col_lower and 'prozentwert' in col_lower and 'b2b' in col_lower:
+                return col
+    else:
+        # Suche nach Normal Conversion Rate Spalte
+        for col in df.columns:
+            col_lower = col.lower()
+            if 'bestellposten' in col_lower and 'sitzung' in col_lower and 'prozentsatz' in col_lower and 'b2b' not in col_lower:
+                return col
+    return None
+
 def aggregate_data(df, traffic_type='normal', is_account_level=False):
     """Aggregiert Daten über alle ASINs (oder Account-Level) und berechnet zusätzliche KPIs"""
     if traffic_type == 'B2B':
-        units_col = find_column(df, ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
-        revenue_col = find_column(df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
-        views_col = find_column(df, [
-            'Seitenaufrufe – Summe – B2B',
-            'Seitenaufrufe - Summe - B2B',
-            'Sitzungen – Summe – B2B',
-            'Sitzungen - Summe - B2B'
-        ])
-        sessions_col = find_column(df, ['Sitzungen – Summe – B2B', 'Sitzungen - Summe - B2B'])
-        orders_col = find_column(df, ['Zahl der Bestellposten – B2B', 'Zahl der Bestellposten - B2B'])
-        mobile_sessions_col = find_column(df, ['Sitzungen – mobile App – B2B', 'Sitzungen - mobile App - B2B'])
-        browser_sessions_col = find_column(df, ['Sitzungen – Browser – B2B', 'Sitzungen - Browser - B2B'])
+        # Für B2B: AUSSCHLIESSLICH die Spalte "Bestellte Einheiten – B2B" verwenden
+        # KEINE Fallbacks, KEINE Suche nach ähnlichen Spalten, KEINE normale Spalte
+        # DIREKT im ersten Schritt setzen, damit nichts anderes es überschreiben kann
+        # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+        units_col = find_b2b_units_column(df)
+        if units_col is None:
+            # Spalte existiert nicht - erstelle sie mit 0-Werten
+            units_col = 'Bestellte Einheiten – B2B'
+            df[units_col] = 0
+        
+        b2b_revenue_candidates = ['Bestellsumme – B2B', 'Bestellsumme - B2B']
+        revenue_col = None
+        for candidate in b2b_revenue_candidates:
+            if candidate in df.columns:
+                revenue_col = candidate
+                break
+        if revenue_col is None:
+            revenue_col = find_column(df, b2b_revenue_candidates)
+        # Für B2B: Prüfe explizit ob B2B-Spalten existieren
+        b2b_views_candidates = ['Seitenaufrufe – Summe – B2B', 'Seitenaufrufe - Summe - B2B', 'Sitzungen – Summe – B2B', 'Sitzungen - Summe - B2B']
+        views_col = None
+        for candidate in b2b_views_candidates:
+            if candidate in df.columns:
+                views_col = candidate
+                break
+        if views_col is None:
+            views_col = find_column(df, b2b_views_candidates)
+        
+        # Für B2B: AUSSCHLIESSLICH die exakte B2B-Sitzungen-Spalte verwenden
+        sessions_col = None
+        # Prüfe exakt diese beiden Varianten (mit unterschiedlichen Bindestrichen)
+        if 'Sitzungen – Summe – B2B' in df.columns:
+            sessions_col = 'Sitzungen – Summe – B2B'
+        elif 'Sitzungen - Summe - B2B' in df.columns:
+            sessions_col = 'Sitzungen - Summe - B2B'
+        # KEINE Fallback-Suche, KEINE ähnlichen Spalten
+        
+        b2b_orders_candidates = ['Zahl der Bestellposten – B2B', 'Zahl der Bestellposten - B2B']
+        orders_col = None
+        for candidate in b2b_orders_candidates:
+            if candidate in df.columns:
+                orders_col = candidate
+                break
+        if orders_col is None:
+            orders_col = find_column(df, b2b_orders_candidates)
+        
+        b2b_mobile_candidates = ['Sitzungen – mobile App – B2B', 'Sitzungen - mobile App - B2B']
+        mobile_sessions_col = None
+        for candidate in b2b_mobile_candidates:
+            if candidate in df.columns:
+                mobile_sessions_col = candidate
+                break
+        if mobile_sessions_col is None:
+            mobile_sessions_col = find_column(df, b2b_mobile_candidates)
+        
+        b2b_browser_candidates = ['Sitzungen – Browser – B2B', 'Sitzungen - Browser - B2B']
+        browser_sessions_col = None
+        for candidate in b2b_browser_candidates:
+            if candidate in df.columns:
+                browser_sessions_col = candidate
+                break
+        if browser_sessions_col is None:
+            browser_sessions_col = find_column(df, b2b_browser_candidates)
     else:
         units_col = find_column(df, ['Bestellte Einheiten'])
         revenue_col = find_column(df, ['Durch bestellte Produkte erzielter Umsatz'])
@@ -248,17 +344,28 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     # WICHTIG: Prüfe ob Spalte wirklich im DataFrame existiert, nicht ob Werte 0 sind
     missing_cols = []
     
-    # Für units_col - prüfe ob Spalte existiert, auch wenn find_column None zurückgab
+    # Für units_col - prüfe ob Spalte existiert
+    # BEI B2B: KEINE Fallbacks zur normalen Spalte! NUR B2B-Spalte verwenden!
     if units_col is None:
-        expected_name = 'Bestellte Einheiten' + (' – B2B' if traffic_type == 'B2B' else '')
-        # Prüfe ob Spalte trotzdem existiert (mit exaktem Namen)
-        if expected_name in df.columns:
-            units_col = expected_name
+        if traffic_type == 'B2B':
+            # Für B2B: AUSSCHLIESSLICH die exakte B2B-Spalte verwenden (mit Non-Breaking Space)
+            # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+            units_col = find_b2b_units_column(df)
+            if units_col is None:
+                # Spalte fehlt wirklich - erstelle sie mit 0-Werten
+                missing_cols.append('Bestellte Einheiten – B2B')
+                units_col = 'Bestellte Einheiten – B2B'
+                df[units_col] = 0
         else:
-            # Spalte fehlt wirklich
-            missing_cols.append(expected_name)
-            df[expected_name] = 0
-            units_col = expected_name
+            expected_name = 'Bestellte Einheiten'
+            # Prüfe ob Spalte trotzdem existiert (mit exaktem Namen)
+            if expected_name in df.columns:
+                units_col = expected_name
+            else:
+                # Spalte fehlt wirklich
+                missing_cols.append(expected_name)
+                df[expected_name] = 0
+                units_col = expected_name
     
     # Für revenue_col
     if revenue_col is None:
@@ -295,12 +402,24 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     
     # Für sessions_col
     if sessions_col is None:
-        expected_name = 'Sitzungen – Summe' + (' – B2B' if traffic_type == 'B2B' else '')
-        if expected_name in df.columns:
-            sessions_col = expected_name
+        if traffic_type == 'B2B':
+            # Bei B2B: AUSSCHLIESSLICH die exakte B2B-Sitzungen-Spalte verwenden
+            if 'Sitzungen – Summe – B2B' in df.columns:
+                sessions_col = 'Sitzungen – Summe – B2B'
+            elif 'Sitzungen - Summe - B2B' in df.columns:
+                sessions_col = 'Sitzungen - Summe - B2B'
+            else:
+                # KEIN Fallback - Fehler anzeigen
+                # Erstelle Spalte mit 0-Werten als letzten Ausweg
+                sessions_col = 'Sitzungen – Summe – B2B'
+                df[sessions_col] = 0
         else:
-            df[expected_name] = 0
-            sessions_col = expected_name
+            expected_name = 'Sitzungen – Summe'
+            if expected_name in df.columns:
+                sessions_col = expected_name
+            else:
+                df[expected_name] = 0
+                sessions_col = expected_name
     
     # Für orders_col
     if orders_col is None:
@@ -329,12 +448,24 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             df[expected_name] = 0
             browser_sessions_col = expected_name
     
-    # DEBUG: Zeige welche Spalten gefunden wurden
-    debug_info = []
-    debug_info.append(f"**Gefundene Spalten für {traffic_type} Traffic:**")
-    debug_info.append(f"- Bestellte Einheiten: {units_col if units_col else 'NICHT GEFUNDEN'}")
-    debug_info.append(f"- Umsatz: {revenue_col if revenue_col else 'NICHT GEFUNDEN'}")
-    debug_info.append(f"- Seitenaufrufe: {views_col if views_col else 'NICHT GEFUNDEN'}")
+    # WICHTIG: Bei B2B muss sichergestellt werden, dass wirklich die B2B-Spalte verwendet wird
+    # Prüfe dies SOFORT nach dem Finden der Spalten, VOR der Debug-Ausgabe
+    if traffic_type == 'B2B':
+        # Prüfe ob units_col wirklich die exakte B2B-Spalte ist (mit Non-Breaking Space)
+        # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+        b2b_col_found = find_b2b_units_column(df)
+        if b2b_col_found:
+            units_col = b2b_col_found
+        elif units_col is None:
+            units_col = None
+    
+    # Bei B2B: FORCIERE die exakte B2B-Spalte nochmal (mit Non-Breaking Space)
+    if traffic_type == 'B2B':
+        # ÜBERSCHREIBE units_col IMMER mit der exakten B2B-Spalte
+        b2b_col_found = find_b2b_units_column(df)
+        if b2b_col_found:
+            if units_col != b2b_col_found:
+                units_col = b2b_col_found
     
     # Prüfe ob Spalten wirklich im DataFrame existieren
     final_missing = []
@@ -345,16 +476,8 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     if views_col and views_col not in df.columns:
         final_missing.append(views_col)
     
-    # Zeige Debug-Info in einem Expander
-    with st.expander("🔍 Debug: Spaltensuche", expanded=False):
-        st.markdown("\n".join(debug_info))
-        if final_missing:
-            st.error(f"⚠️ Diese Spalten wurden nicht im DataFrame gefunden: {', '.join(final_missing)}")
-        else:
-            st.success("✅ Alle benötigten Spalten wurden gefunden!")
-    
-    if final_missing:
-        st.warning(f"⚠️ Folgende Spalten fehlen wirklich in den Daten: {', '.join(final_missing)}")
+    # Prüfe ob Conversion Rate Spalte vorhanden ist (mit Non-Breaking Space) - VOR der Aggregation
+    cr_col = find_cr_column(df, traffic_type)
     
     # Bei Account-Level Reports sind die Daten bereits aggregiert, bei ASIN-Level müssen wir gruppieren
     if is_account_level:
@@ -369,7 +492,82 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
                 aggregated[col] = 0
     else:
         # ASIN-Level: Gruppiere nach Zeitraum
-        aggregated = df.groupby('Zeitraum').agg({
+        # KRITISCH: Bei B2B - FORCIERE die exakte B2B-Spalte
+        if traffic_type == 'B2B':
+            # ÜBERSCHREIBE units_col mit der exakten B2B-Spalte, egal was vorher gesetzt war (mit Non-Breaking Space)
+            b2b_col_found = find_b2b_units_column(df)
+            if b2b_col_found:
+                units_col = b2b_col_found
+            else:
+                # Erstelle Spalte mit 0-Werten als letzten Ausweg
+                units_col = 'Bestellte Einheiten – B2B'
+                df[units_col] = 0
+        
+        # Stelle sicher, dass units_col gesetzt ist, bevor aggregiert wird
+        # BEI B2B: FORCIERE IMMER die exakte B2B-Spalte, auch wenn units_col bereits gesetzt ist
+        if traffic_type == 'B2B':
+            # ÜBERSCHREIBE units_col IMMER mit der exakten B2B-Spalte (mit Non-Breaking Space)
+            b2b_col_found = find_b2b_units_column(df)
+            if b2b_col_found:
+                if units_col != b2b_col_found:
+                    units_col = b2b_col_found
+            else:
+                # Erstelle Spalte mit 0-Werten als letzten Ausweg
+                units_col = 'Bestellte Einheiten – B2B'
+                df[units_col] = 0
+        elif units_col is None:
+            # Nur für normalen Traffic, nicht für B2B
+            if traffic_type != 'B2B':
+                units_col = 'Bestellte Einheiten'
+                if units_col not in df.columns:
+                    df[units_col] = 0
+        
+        # KRITISCH: Bei B2B - FINALE Prüfung direkt vor Aggregation
+        # AUSSCHLIESSLICH die exakte Spalte "Bestellte Einheiten – B2B" verwenden
+        if traffic_type == 'B2B':
+            # Prüfe ob units_col wirklich die exakte B2B-Spalte ist (mit Non-Breaking Space)
+            b2b_col_found = find_b2b_units_column(df)
+            if b2b_col_found and units_col != b2b_col_found:
+                # Korrigiere auf die exakte Spalte
+                units_col = b2b_col_found
+        
+        # ABSOLUT KRITISCH: Bei B2B - Letzte Prüfung direkt VOR der Aggregation
+        # AUSSCHLIESSLICH die exakte Spalte "Bestellte Einheiten – B2B" verwenden
+        if traffic_type == 'B2B':
+            # Prüfe ob units_col wirklich die exakte B2B-Spalte ist
+            if units_col not in ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B']:
+                # Korrigiere auf die exakte Spalte
+                if 'Bestellte Einheiten – B2B' in df.columns:
+                    units_col = 'Bestellte Einheiten – B2B'
+                elif 'Bestellte Einheiten - B2B' in df.columns:
+                    units_col = 'Bestellte Einheiten - B2B'
+        
+        # ABSOLUT LETZTE PRÜFUNG: Bei B2B FORCIERE die exakte B2B-Spalte direkt vor der Aggregation (mit Non-Breaking Space)
+        if traffic_type == 'B2B':
+            b2b_col_found = find_b2b_units_column(df)
+            if b2b_col_found and units_col != b2b_col_found:
+                units_col = b2b_col_found
+        
+        # ABSOLUT FINALE PRÜFUNG: Bei B2B FORCIERE die B2B-Spalte DIREKT vor groupby.agg() (mit Non-Breaking Space)
+        if traffic_type == 'B2B':
+            # ÜBERSCHREIBE units_col IMMER mit der exakten B2B-Spalte, egal was vorher war
+            b2b_col_found = find_b2b_units_column(df)
+            if b2b_col_found and units_col != b2b_col_found:
+                units_col = b2b_col_found
+        
+        # KRITISCH: Bei B2B - Letzte Prüfung DIREKT vor groupby.agg()
+        # Stelle sicher, dass units_col wirklich die B2B-Spalte ist
+        if traffic_type == 'B2B':
+            # Prüfe ob units_col wirklich die B2B-Spalte ist
+            if units_col not in ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B']:
+                # Korrigiere auf die exakte B2B-Spalte
+                if 'Bestellte Einheiten – B2B' in df.columns:
+                    units_col = 'Bestellte Einheiten – B2B'
+                elif 'Bestellte Einheiten - B2B' in df.columns:
+                    units_col = 'Bestellte Einheiten - B2B'
+        
+        # Aggregations-Dictionary
+        agg_dict = {
             units_col: 'sum',
             revenue_col: 'sum',
             views_col: 'sum',
@@ -377,7 +575,16 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             orders_col: 'sum',
             mobile_sessions_col: 'sum',
             browser_sessions_col: 'sum'
-        }).reset_index()
+        }
+        
+        # Wenn Conversion Rate Spalte vorhanden ist, füge sie mit 'mean' hinzu
+        if cr_col and cr_col in df.columns:
+            agg_dict[cr_col] = 'mean'  # Mittelwert für Conversion Rate
+        
+        aggregated = df.groupby('Zeitraum').agg(agg_dict).reset_index()
+    
+    if final_missing:
+        st.warning(f"⚠️ Folgende Spalten fehlen wirklich in den Daten: {', '.join(final_missing)}")
     
     # Stelle sicher, dass alle Spalten numerisch sind (mit deutschem Format)
     for col in [units_col, revenue_col, views_col, sessions_col, orders_col, mobile_sessions_col, browser_sessions_col]:
@@ -389,13 +596,26 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             else:
                 aggregated[col] = aggregated[col].apply(parse_numeric_value)
     
-    # Berechne zusätzliche KPIs (mit Division durch Null Schutz)
-    # Spalten sind bereits numerisch konvertiert, können direkt verwendet werden
-    aggregated['Conversion Rate (%)'] = (
-        (aggregated[units_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
-        .fillna(0)
-        .replace([np.inf, -np.inf], 0)
-    )
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    # WICHTIG: Suche die CR-Spalte in aggregated (nach Aggregation), aber verwende die ursprünglich gefundene cr_col wenn sie noch vorhanden ist
+    cr_col_after_agg = None
+    if cr_col and cr_col in aggregated.columns:
+        # Die ursprünglich gefundene CR-Spalte ist noch vorhanden (wurde aggregiert)
+        cr_col_after_agg = cr_col
+    else:
+        # Suche erneut in aggregated (falls Spalte umbenannt wurde oder nicht gefunden wurde)
+        cr_col_after_agg = find_cr_column(aggregated, traffic_type)
+    
+    if cr_col_after_agg and cr_col_after_agg in aggregated.columns:
+        # Verwende vorhandene Conversion Rate Spalte (bereits als Mittelwert aggregiert)
+        aggregated['Conversion Rate (%)'] = aggregated[cr_col_after_agg].fillna(0)
+    else:
+        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+        aggregated['Conversion Rate (%)'] = (
+            (aggregated[orders_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
     
     # AOV = Umsatz / Anzahl der Bestellposten
     # Prüfe zuerst, ob bereits eine AOV-Spalte in den Originaldaten vorhanden ist
@@ -432,25 +652,7 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             .replace([np.inf, -np.inf], 0)
         )
     
-    # Debug: Zeige welche Spalten für AOV verwendet werden
-    with st.expander("🔍 Debug: AOV-Berechnung", expanded=False):
-        st.write(f"**Verwendete Spalten für AOV:**")
-        st.write(f"- Umsatz-Spalte: `{revenue_col}`")
-        st.write(f"- Bestellposten-Spalte: `{orders_col}`")
-        if aov_col_alt:
-            st.write(f"- Gefundene AOV-Spalte in Originaldaten: `{aov_col_alt}` (wird nicht verwendet, da gewichteter Durchschnitt benötigt wird)")
-        if orders_col in aggregated.columns:
-            st.write(f"- Beispielwerte aus `{orders_col}`: {aggregated[orders_col].head(3).tolist()}")
-        if revenue_col in aggregated.columns:
-            st.write(f"- Beispielwerte aus `{revenue_col}`: {aggregated[revenue_col].head(3).tolist()}")
-        if 'AOV (€)' in aggregated.columns:
-            st.write(f"- Berechnete AOV-Werte: {aggregated['AOV (€)'].head(3).tolist()}")
-            if len(aggregated) > 0:
-                sample_idx = 0
-                if orders_col in aggregated.columns and aggregated[orders_col].iloc[sample_idx] != 0:
-                    manual_calc = aggregated[revenue_col].iloc[sample_idx] / aggregated[orders_col].iloc[sample_idx]
-                    st.write(f"- Manuelle Prüfung (Zeile 0): {aggregated[revenue_col].iloc[sample_idx]:.2f} € / {aggregated[orders_col].iloc[sample_idx]:.0f} = {manual_calc:.2f} €")
-                    st.write(f"- Tatsächlicher berechneter Wert: {aggregated['AOV (€)'].iloc[sample_idx]:.2f} €")
+    # Revenue per Session = Umsatz / Sitzungen
     aggregated['Revenue per Session (€)'] = (
         (aggregated[revenue_col] / aggregated[sessions_col].replace(0, np.nan))
         .fillna(0)
@@ -459,15 +661,61 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     
     # Umbenennen der Spalten - nur die Spalten die tatsächlich vorhanden sind
     # Erstelle Mapping ohne 'Zeitraum' (wird nicht umbenannt)
-    column_mapping = {
-        units_col: 'Bestellte Einheiten',
-        revenue_col: 'Umsatz',
-        views_col: 'Seitenaufrufe',
-        sessions_col: 'Sitzungen',
-        orders_col: 'Bestellungen',
-        mobile_sessions_col: 'Mobile Sitzungen',
-        browser_sessions_col: 'Browser Sitzungen'
-    }
+    # KRITISCH: Bei B2B muss sichergestellt werden, dass units_col wirklich die B2B-Spalte ist
+    # Prüfe DIREKT in aggregated.columns, welche Spalte tatsächlich aggregiert wurde
+    if traffic_type == 'B2B':
+        # Prüfe welche B2B-Spalte tatsächlich in aggregated.columns vorhanden ist
+        actual_b2b_col = None
+        if 'Bestellte Einheiten – B2B' in aggregated.columns:
+            actual_b2b_col = 'Bestellte Einheiten – B2B'
+        elif 'Bestellte Einheiten - B2B' in aggregated.columns:
+            actual_b2b_col = 'Bestellte Einheiten - B2B'
+        
+        # Wenn eine B2B-Spalte gefunden wurde, verwende diese
+        if actual_b2b_col:
+            if units_col != actual_b2b_col:
+                old_units_col = units_col
+                units_col = actual_b2b_col
+    
+    # KRITISCH: Bei B2B - FINALE Prüfung VOR dem Erstellen des column_mapping
+    # Stelle sicher, dass units_col wirklich die B2B-Spalte ist, die aggregiert wurde
+    if traffic_type == 'B2B':
+        # Prüfe welche B2B-Spalte tatsächlich in aggregated.columns vorhanden ist
+        actual_b2b_col_in_agg = None
+        if 'Bestellte Einheiten – B2B' in aggregated.columns:
+            actual_b2b_col_in_agg = 'Bestellte Einheiten – B2B'
+        elif 'Bestellte Einheiten - B2B' in aggregated.columns:
+            actual_b2b_col_in_agg = 'Bestellte Einheiten - B2B'
+        
+        # Wenn eine B2B-Spalte in aggregated gefunden wurde, verwende diese für das Mapping
+        if actual_b2b_col_in_agg:
+            if units_col != actual_b2b_col_in_agg:
+                units_col = actual_b2b_col_in_agg
+    
+    # Bei B2B: Behalte den originalen Spaltennamen "Bestellte Einheiten – B2B"
+    # Bei normalem Traffic: Benenne zu "Bestellte Einheiten" um
+    if traffic_type == 'B2B':
+        # Für B2B: Behalte den originalen Namen, benenne NICHT um
+        column_mapping = {
+            revenue_col: 'Umsatz',
+            views_col: 'Seitenaufrufe',
+            sessions_col: 'Sitzungen',
+            orders_col: 'Bestellungen',
+            mobile_sessions_col: 'Mobile Sitzungen',
+            browser_sessions_col: 'Browser Sitzungen'
+        }
+        # units_col wird NICHT umbenannt, bleibt "Bestellte Einheiten – B2B" (oder "Bestellte Einheiten - B2B")
+    else:
+        # Für normalen Traffic: Benenne alle Spalten um
+        column_mapping = {
+            units_col: 'Bestellte Einheiten',
+            revenue_col: 'Umsatz',
+            views_col: 'Seitenaufrufe',
+            sessions_col: 'Sitzungen',
+            orders_col: 'Bestellungen',
+            mobile_sessions_col: 'Mobile Sitzungen',
+            browser_sessions_col: 'Browser Sitzungen'
+        }
     
     # Prüfe auf doppelte Zielnamen und benenne nur um, wenn nötig
     rename_dict = {}
@@ -488,7 +736,7 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     
     return aggregated
 
-def aggregate_by_period(df, period='week'):
+def aggregate_by_period(df, period='week', traffic_type='normal'):
     """Aggregiert Daten nach Zeitraum (Woche, Monat, YTD)"""
     if 'Zeitraum' not in df.columns:
         return df
@@ -518,8 +766,19 @@ def aggregate_by_period(df, period='week'):
     # Identifiziere Spalten die NICHT summiert werden sollen (sondern neu berechnet)
     # AOV und Conversion Rate müssen neu berechnet werden, nicht summiert
     exclude_from_sum = ['AOV (€)', 'Conversion Rate (%)', 'Revenue per Session (€)', 'Zeitraum_DT', 'Zeitraum_Nr']
+    # Conversion Rate Spalten sollen als Mittelwert aggregiert werden, nicht summiert
+    # Finde alle Conversion Rate Spalten (auch mit Non-Breaking Spaces) und füge sie hinzu
+    for col in df.columns:
+        col_lower = col.lower()
+        if ('bestellposten' in col_lower and 'sitzung' in col_lower and 
+            ('prozentsatz' in col_lower or 'prozentwert' in col_lower)):
+            exclude_from_sum.append(col)
     if 'Jahr' in df.columns:
         exclude_from_sum.append('Jahr')
+    
+    # Prüfe ob Conversion Rate Spalten vorhanden sind (sollten als Mittelwert aggregiert werden, mit Non-Breaking Space)
+    cr_col_normal = find_cr_column(df, 'normal')
+    cr_col_b2b = find_cr_column(df, 'B2B')
     
     # Numerische Spalten für Aggregation identifizieren
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -528,6 +787,13 @@ def aggregate_by_period(df, period='week'):
     
     # Gruppiere und aggregiere (nur Spalten die summiert werden sollen)
     agg_dict = {col: 'sum' for col in numeric_cols if col in df.columns}
+    
+    # Conversion Rate Spalten als Mittelwert aggregieren (wenn vorhanden)
+    if cr_col_normal and cr_col_normal in df.columns:
+        agg_dict[cr_col_normal] = 'mean'
+    if cr_col_b2b and cr_col_b2b in df.columns:
+        agg_dict[cr_col_b2b] = 'mean'
+    
     agg_dict['Zeitraum_DT'] = 'first'  # Behalte erstes Datum für Sortierung
     
     aggregated = df.groupby('Zeitraum_Agg', as_index=False).agg(agg_dict)
@@ -548,15 +814,30 @@ def aggregate_by_period(df, period='week'):
     
     # Finde die Basis-Spalten für die Berechnung
     # Diese sollten bereits in aggregated vorhanden sein (wurden summiert)
-    units_col_agg = 'Bestellte Einheiten' if 'Bestellte Einheiten' in aggregated.columns else None
+    # Bei B2B: Verwende die originale Spalte "Bestellte Einheiten – B2B" (mit Non-Breaking Space)
+    units_col_agg = None
+    # Zuerst prüfe ob B2B-Spalte vorhanden ist (berücksichtigt auch Non-Breaking Spaces)
+    b2b_col = find_b2b_units_column(aggregated)
+    if b2b_col:
+        units_col_agg = b2b_col
+    elif 'Bestellte Einheiten' in aggregated.columns:
+        units_col_agg = 'Bestellte Einheiten'
+    
     revenue_col_agg = 'Umsatz' if 'Umsatz' in aggregated.columns else None
     sessions_col_agg = 'Sitzungen' if 'Sitzungen' in aggregated.columns else None
     orders_col_agg = 'Bestellungen' if 'Bestellungen' in aggregated.columns else None
     
-    # Conversion Rate = (Bestellte Einheiten / Sitzungen) * 100
-    if units_col_agg and sessions_col_agg:
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    # WICHTIG: Verwende den übergebenen traffic_type Parameter, um die richtige CR-Spalte zu finden
+    cr_col = find_cr_column(aggregated, traffic_type)
+    
+    if cr_col and cr_col in aggregated.columns:
+        # Verwende die gefundene CR-Spalte (bereits als Mittelwert aggregiert)
+        aggregated['Conversion Rate (%)'] = aggregated[cr_col].fillna(0)
+    elif orders_col_agg and sessions_col_agg:
+        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
         aggregated['Conversion Rate (%)'] = (
-            (aggregated[units_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan) * 100)
+            (aggregated[orders_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan) * 100)
             .fillna(0)
             .replace([np.inf, -np.inf], 0)
         )
@@ -582,7 +863,8 @@ def aggregate_by_period(df, period='week'):
 def get_top_flop_asins(df, traffic_type='normal'):
     """Identifiziert Top- und Flop-ASINs basierend auf Umsatz"""
     if traffic_type == 'B2B':
-        units_col = find_column(df, ['Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
+        # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+        units_col = find_b2b_units_column(df)
         revenue_col = find_column(df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
         views_col = find_column(df, ['Seitenaufrufe – Summe – B2B', 'Seitenaufrufe - Summe - B2B'])
         sessions_col = find_column(df, ['Sitzungen – Summe – B2B', 'Sitzungen - Summe - B2B'])
@@ -616,11 +898,22 @@ def get_top_flop_asins(df, traffic_type='normal'):
     }).reset_index()
     
     # Berechne KPIs
-    asin_data['Conversion Rate (%)'] = (
-        (asin_data[units_col] / asin_data[sessions_col].replace(0, np.nan) * 100)
-        .fillna(0)
-        .replace([np.inf, -np.inf], 0)
-    )
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    cr_col = find_cr_column(df, traffic_type)
+    
+    if cr_col and cr_col in df.columns:
+        # Verwende vorhandene Conversion Rate Spalte (als Mittelwert aggregiert)
+        asin_cr = df.groupby(asin_column)[cr_col].mean().reset_index()
+        asin_cr.columns = [asin_column, 'Conversion Rate (%)']
+        asin_data = asin_data.merge(asin_cr, on=asin_column, how='left')
+        asin_data['Conversion Rate (%)'] = asin_data['Conversion Rate (%)'].fillna(0)
+    else:
+        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+        asin_data['Conversion Rate (%)'] = (
+            (asin_data[orders_col] / asin_data[sessions_col].replace(0, np.nan) * 100)
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
     asin_data['AOV (€)'] = (
         (asin_data[revenue_col] / asin_data[orders_col].replace(0, np.nan))
         .fillna(0)
@@ -671,15 +964,65 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
     
     summary_parts = [f"**Vergleich zwischen {previous_period} und {current_period}:**\n\n"]
     
-    # Bestellte Einheiten
-    units_change = current['Bestellte Einheiten'] - previous['Bestellte Einheiten']
-    units_pct = ((current['Bestellte Einheiten'] / previous['Bestellte Einheiten'] - 1) * 100) if previous['Bestellte Einheiten'] > 0 else 0
-    if units_change > 0:
-        summary_parts.append(f"✅ Die bestellten Einheiten sind von {previous['Bestellte Einheiten']:.0f} auf {current['Bestellte Einheiten']:.0f} gestiegen (+{units_change:.0f} Einheiten, {units_pct:+.1f}%).")
-    elif units_change < 0:
-        summary_parts.append(f"❌ Die bestellten Einheiten sind von {previous['Bestellte Einheiten']:.0f} auf {current['Bestellte Einheiten']:.0f} gesunken ({units_change:.0f} Einheiten, {units_pct:+.1f}%).")
+    # Bestellte Einheiten - bei kombinierter Ansicht: Summe aus Normal und B2B
+    # Bei B2B: nur B2B-Spalte, bei Normal: nur Normal-Spalte
+    units_col_name = None
+    if traffic_type == 'normal' and 'Bestellte Einheiten (Gesamt)' in current.index and 'Bestellte Einheiten (Gesamt)' in previous.index:
+        # Kombinierte Ansicht: Verwende die bereits berechnete Gesamt-Spalte
+        units_col_name = 'Bestellte Einheiten (Gesamt)'
+    elif traffic_type == 'B2B':
+        # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+        # Prüfe beide DataFrames (current und previous)
+        current_df = pd.DataFrame([current])
+        previous_df = pd.DataFrame([previous])
+        b2b_col_current = find_b2b_units_column(current_df)
+        b2b_col_previous = find_b2b_units_column(previous_df)
+        # Verwende die Spalte, wenn sie in beiden vorhanden ist
+        if b2b_col_current and b2b_col_previous and b2b_col_current == b2b_col_previous:
+            units_col_name = b2b_col_current
+        # Fallback: Prüfe direkt im Index
+        elif 'Bestellte Einheiten – B2B' in current.index and 'Bestellte Einheiten – B2B' in previous.index:
+            units_col_name = 'Bestellte Einheiten – B2B'
+        elif 'Bestellte Einheiten - B2B' in current.index and 'Bestellte Einheiten - B2B' in previous.index:
+            units_col_name = 'Bestellte Einheiten - B2B'
     else:
-        summary_parts.append(f"➡️ Die bestellten Einheiten sind unverändert bei {current['Bestellte Einheiten']:.0f} Einheiten.")
+        # Normal Traffic oder kombinierte Ansicht ohne Gesamt-Spalte
+        if 'Bestellte Einheiten (Gesamt)' in current.index and 'Bestellte Einheiten (Gesamt)' in previous.index:
+            units_col_name = 'Bestellte Einheiten (Gesamt)'
+        elif 'Bestellte Einheiten' in current.index and 'Bestellte Einheiten' in previous.index:
+            units_col_name = 'Bestellte Einheiten'
+        else:
+            # Fallback: Versuche beide Spalten zu finden und zu summieren
+            normal_col = 'Bestellte Einheiten' if 'Bestellte Einheiten' in current.index else None
+            current_df = pd.DataFrame([current])
+            previous_df = pd.DataFrame([previous])
+            b2b_col_current = find_b2b_units_column(current_df)
+            b2b_col_previous = find_b2b_units_column(previous_df)
+            
+            if normal_col and b2b_col_current and b2b_col_previous:
+                # Beide Spalten vorhanden: Berechne Summe manuell
+                current_sum = current[normal_col] if normal_col in current.index else 0
+                current_sum += current[b2b_col_current] if b2b_col_current in current.index else 0
+                previous_sum = previous[normal_col] if normal_col in previous.index else 0
+                previous_sum += previous[b2b_col_previous] if b2b_col_previous in previous.index else 0
+                # Verwende temporäre Werte
+                current['Bestellte Einheiten (Gesamt)'] = current_sum
+                previous['Bestellte Einheiten (Gesamt)'] = previous_sum
+                units_col_name = 'Bestellte Einheiten (Gesamt)'
+            elif normal_col:
+                units_col_name = normal_col
+            elif b2b_col_current and b2b_col_previous:
+                units_col_name = b2b_col_current
+    
+    if units_col_name and units_col_name in current.index and units_col_name in previous.index:
+        units_change = current[units_col_name] - previous[units_col_name]
+        units_pct = ((current[units_col_name] / previous[units_col_name] - 1) * 100) if previous[units_col_name] > 0 else 0
+        if units_change > 0:
+            summary_parts.append(f"✅ Die bestellten Einheiten sind von {previous[units_col_name]:.0f} auf {current[units_col_name]:.0f} gestiegen (+{units_change:.0f} Einheiten, {units_pct:+.1f}%).")
+        elif units_change < 0:
+            summary_parts.append(f"❌ Die bestellten Einheiten sind von {previous[units_col_name]:.0f} auf {current[units_col_name]:.0f} gesunken ({units_change:.0f} Einheiten, {units_pct:+.1f}%).")
+        else:
+            summary_parts.append(f"➡️ Die bestellten Einheiten sind unverändert bei {current[units_col_name]:.0f} Einheiten.")
     
     # Umsatz
     revenue_change = current['Umsatz'] - previous['Umsatz']
@@ -775,10 +1118,16 @@ if uploaded_files:
         # Traffic-Typ Auswahl
         traffic_type = st.sidebar.radio(
             "Traffic-Typ",
-            ['Normal', 'B2B'],
+            ['Normal', 'B2B', 'Kombiniert'],
             index=0
         )
-        traffic_type_key = 'B2B' if traffic_type == 'B2B' else 'normal'
+        
+        if traffic_type == 'Kombiniert':
+            show_combined = True
+            traffic_type_key = 'normal'  # Für die Verarbeitung, wird dann beide laden
+        else:
+            show_combined = False
+            traffic_type_key = 'B2B' if traffic_type == 'B2B' else 'normal'
         
         # Prüfe ob es Account-Level oder ASIN-Level Reports sind
         is_account_level = combined_df['Report_Typ'].iloc[0] == 'Account-Level' if 'Report_Typ' in combined_df.columns else False
@@ -816,34 +1165,20 @@ if uploaded_files:
         # Hauptbereich
         st.header("📈 KPI-Übersicht")
         
-        # DEBUG: Zeige alle verfügbaren Spalten
-        with st.expander("🔍 Debug: Verfügbare Spalten anzeigen", expanded=False):
-            st.write("**Alle Spalten im DataFrame:**")
-            st.write(list(filtered_df.columns))
-            st.write(f"\n**Anzahl Spalten:** {len(filtered_df.columns)}")
-            
-            # Zeige relevante Spalten
-            st.write("\n**Relevante Spalten für aktuellen Traffic-Typ:**")
-            if traffic_type_key == 'B2B':
-                st.write("- Gesucht: 'Bestellte Einheiten – B2B'")
-                st.write("- Gesucht: 'Bestellsumme – B2B'")
-                st.write("- Gesucht: 'Seitenaufrufe – Summe – B2B'")
-            else:
-                st.write("- Gesucht: 'Bestellte Einheiten'")
-                st.write("- Gesucht: 'Durch bestellte Produkte erzielter Umsatz'")
-                st.write("- Gesucht: 'Seitenaufrufe – Summe'")
-            
-            # Finde ähnliche Spalten
-            st.write("\n**Ähnliche Spalten gefunden:**")
-            all_cols = list(filtered_df.columns)
-            search_terms = ['seitenaufrufe', 'sitzungen', 'summe', 'bestellte', 'einheiten', 'umsatz', 'b2b']
-            for term in search_terms:
-                matching = [col for col in all_cols if term.lower() in col.lower()]
-                if matching:
-                    st.write(f"- '{term}': {matching}")
-        
         # Aggregiere Daten
-        aggregated_data = aggregate_data(filtered_df, traffic_type_key, is_account_level=is_account_level)
+        if show_combined:
+            # Lade beide Traffic-Typen
+            aggregated_data_normal = aggregate_data(filtered_df, 'normal', is_account_level=is_account_level)
+            aggregated_data_b2b = aggregate_data(filtered_df, 'B2B', is_account_level=is_account_level)
+            
+            # Markiere die Daten mit Traffic-Typ
+            aggregated_data_normal['Traffic_Typ'] = 'Normal'
+            aggregated_data_b2b['Traffic_Typ'] = 'B2B'
+            
+            # Verwende normal für die weitere Verarbeitung (wird später beide zeigen)
+            aggregated_data = aggregated_data_normal.copy()
+        else:
+            aggregated_data = aggregate_data(filtered_df, traffic_type_key, is_account_level=is_account_level)
         
         # Prüfe ob Daten auf Tagesebene sind
         # Versuche Zeiträume zu parsen und prüfe ob es Tagesdaten sind
@@ -880,7 +1215,15 @@ if uploaded_files:
         
         # Aggregiere Daten nach gewählter Ebene (vor Jahr-Filterung)
         if is_daily_data:
-            aggregated_data = aggregate_by_period(aggregated_data, period=period_key)
+            if show_combined:
+                # Aggregiere beide Traffic-Typen (mit korrektem traffic_type Parameter)
+                aggregated_data_normal = aggregate_by_period(aggregated_data_normal, period=period_key, traffic_type='normal')
+                aggregated_data_b2b = aggregate_by_period(aggregated_data_b2b, period=period_key, traffic_type='B2B')
+                aggregated_data_normal['Traffic_Typ'] = 'Normal'
+                aggregated_data_b2b['Traffic_Typ'] = 'B2B'
+                aggregated_data = aggregated_data_normal.copy()
+            else:
+                aggregated_data = aggregate_by_period(aggregated_data, period=period_key, traffic_type=traffic_type_key)
         
         # Jahr-Auswahl (wenn mehrere Jahre vorhanden)
         if 'Zeitraum' in aggregated_data.columns:
@@ -924,99 +1267,343 @@ if uploaded_files:
                         aggregated_data = aggregated_data[
                             aggregated_data['Zeitraum'].str.contains(str(year_filter), na=False)
                         ].copy()
+                        if show_combined:
+                            aggregated_data_normal = aggregated_data_normal[
+                                aggregated_data_normal['Zeitraum'].str.contains(str(year_filter), na=False)
+                            ].copy()
+                            aggregated_data_b2b = aggregated_data_b2b[
+                                aggregated_data_b2b['Zeitraum'].str.contains(str(year_filter), na=False)
+                            ].copy()
                     else:
                         # Filtere nach extrahiertem Jahr
                         if 'Jahr_Extracted' in aggregated_data.columns:
                             aggregated_data = aggregated_data[aggregated_data['Jahr_Extracted'] == year_filter].copy()
+                            if show_combined:
+                                if 'Jahr_Extracted' in aggregated_data_normal.columns:
+                                    aggregated_data_normal = aggregated_data_normal[aggregated_data_normal['Jahr_Extracted'] == year_filter].copy()
+                                if 'Jahr_Extracted' in aggregated_data_b2b.columns:
+                                    aggregated_data_b2b = aggregated_data_b2b[aggregated_data_b2b['Jahr_Extracted'] == year_filter].copy()
                         else:
                             # Fallback: Filtere nach String-Match
                             aggregated_data = aggregated_data[
                                 aggregated_data['Zeitraum'].str.contains(str(year_filter), na=False)
                             ].copy()
+                            if show_combined:
+                                aggregated_data_normal = aggregated_data_normal[
+                                    aggregated_data_normal['Zeitraum'].str.contains(str(year_filter), na=False)
+                                ].copy()
+                                aggregated_data_b2b = aggregated_data_b2b[
+                                    aggregated_data_b2b['Zeitraum'].str.contains(str(year_filter), na=False)
+                                ].copy()
             
             # Entferne temporäre Spalte
             if 'Jahr_Extracted' in aggregated_data.columns:
                 aggregated_data = aggregated_data.drop(columns=['Jahr_Extracted'])
+            if show_combined:
+                if 'Jahr_Extracted' in aggregated_data_normal.columns:
+                    aggregated_data_normal = aggregated_data_normal.drop(columns=['Jahr_Extracted'])
+                if 'Jahr_Extracted' in aggregated_data_b2b.columns:
+                    aggregated_data_b2b = aggregated_data_b2b.drop(columns=['Jahr_Extracted'])
         
         # Erstelle numerische Zeitraum-IDs für die X-Achse
-        aggregated_data = aggregated_data.copy()
-        aggregated_data['Zeitraum_Nr'] = range(1, len(aggregated_data) + 1)
+        if show_combined:
+            # Kombiniere beide Traffic-Typen
+            aggregated_data_normal['Zeitraum_Nr'] = range(1, len(aggregated_data_normal) + 1)
+            aggregated_data_b2b['Zeitraum_Nr'] = range(1, len(aggregated_data_b2b) + 1)
+            
+            # Kombiniere beide DataFrames für Visualisierung
+            combined_aggregated = pd.concat([aggregated_data_normal, aggregated_data_b2b], ignore_index=True)
+            # Sortiere nach Zeitraum und Traffic-Typ
+            combined_aggregated = combined_aggregated.sort_values(['Zeitraum', 'Traffic_Typ'])
+            # Erstelle neue Zeitraum_Nr für kombinierte Ansicht
+            combined_aggregated['Zeitraum_Nr'] = combined_aggregated.groupby('Zeitraum').ngroup() + 1
+            
+            aggregated_data = combined_aggregated.copy()
+        else:
+            aggregated_data = aggregated_data.copy()
+            aggregated_data['Zeitraum_Nr'] = range(1, len(aggregated_data) + 1)
         
         # Statistiken (ganz oben)
         st.header("📊 Statistiken")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
         
-        # Finde die tatsächlichen Spaltennamen (mit flexibler Suche)
-        units_col_stat = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
-        revenue_col_stat = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B', 'Bestellsumme - B2B'])
-        views_col_stat = find_column(filtered_df, [
-            'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
-            'Seitenaufrufe - Summe',
-            'Sitzungen – Summe',
-            'Sitzungen - Summe',
-            'Seitenaufrufe – Summe – B2B',
-            'Seitenaufrufe - Summe - B2B'
-        ])
-        
-        # Fallback falls Spalten nicht gefunden werden
-        if units_col_stat is None:
-            units_col_stat = 'Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B'
-        if revenue_col_stat is None:
-            revenue_col_stat = 'Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B'
-        if views_col_stat is None:
-            views_col_stat = 'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B'
-        
-        with col1:
-            if units_col_stat and units_col_stat in filtered_df.columns:
-                units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
-                total_units = units_numeric.sum()
-            else:
-                total_units = 0
-            st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
-        
-        with col2:
-            if revenue_col_stat and revenue_col_stat in filtered_df.columns:
-                revenue_numeric = filtered_df[revenue_col_stat].apply(parse_euro_value)
-                total_revenue = revenue_numeric.sum()
-            else:
-                total_revenue = 0
-            st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
-        
-        with col3:
-            # Seitenaufrufe oder Sitzungen
-            if views_col_stat and views_col_stat in filtered_df.columns:
-                # Konvertiere zu numerisch und berechne Summe
-                views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
-                total_views = views_numeric.sum()
-                if total_views > 0:
+        if show_combined:
+            # Zeige Statistiken für beide Traffic-Typen nebeneinander
+            st.subheader("Normal Traffic")
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            
+            # WICHTIG: Verwende die separaten aggregierten DataFrames, nicht das kombinierte
+            # aggregated_data_normal und aggregated_data_b2b haben die korrekten Conversion Rate Werte
+            # Prüfe ob die Variablen im globalen Scope verfügbar sind
+            try:
+                normal_data_combined = aggregated_data_normal.copy()
+            except NameError:
+                # Fallback: Filtere aus kombiniertem DataFrame
+                normal_data_combined = aggregated_data[aggregated_data['Traffic_Typ'] == 'Normal'] if 'Traffic_Typ' in aggregated_data.columns else aggregated_data
+            
+            # Finde Spalten für Normal Traffic
+            units_col_stat = find_column(filtered_df, ['Bestellte Einheiten'])
+            revenue_col_stat = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz'])
+            views_col_stat = find_column(filtered_df, ['Seitenaufrufe – Summe', 'Sitzungen – Summe'])
+            
+            with col1:
+                # Verwende die aggregierten Normal-Daten direkt, da diese bereits korrekt aus "Bestellte Einheiten" berechnet wurden
+                if 'Bestellte Einheiten' in normal_data_combined.columns:
+                    total_units = normal_data_combined['Bestellte Einheiten'].sum()
+                elif units_col_stat and units_col_stat in filtered_df.columns:
+                    units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
+                    total_units = units_numeric.sum()
+                else:
+                    total_units = 0
+                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+            
+            with col2:
+                if revenue_col_stat and revenue_col_stat in filtered_df.columns:
+                    revenue_numeric = filtered_df[revenue_col_stat].apply(parse_euro_value)
+                    total_revenue = revenue_numeric.sum()
+                else:
+                    total_revenue = normal_data_combined['Umsatz'].sum() if 'Umsatz' in normal_data_combined.columns else 0
+                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+            
+            with col3:
+                if views_col_stat and views_col_stat in filtered_df.columns:
+                    views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
+                    total_views = views_numeric.sum()
                     st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                else:
+                    total_views = normal_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in normal_data_combined.columns else (normal_data_combined['Sitzungen'].sum() if 'Sitzungen' in normal_data_combined.columns else 0)
+                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+            
+            with col4:
+                asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
+                unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
+                st.metric("Anzahl ASINs", f"{unique_asins}")
+            
+            with col5:
+                # Conversion Rate: Verwende vorhandene Spalte aus aggregierten Daten
+                cr_col_normal_stat = find_cr_column(normal_data_combined, 'normal')
+                if cr_col_normal_stat and cr_col_normal_stat in normal_data_combined.columns:
+                    # Verwende die vorhandene CR-Spalte (bereits als Mittelwert aggregiert)
+                    avg_cr = normal_data_combined[cr_col_normal_stat].mean()
+                elif 'Conversion Rate (%)' in normal_data_combined.columns:
+                    avg_cr = normal_data_combined['Conversion Rate (%)'].mean()
+                else:
+                    avg_cr = 0
+                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+            
+            with col6:
+                avg_aov = normal_data_combined['AOV (€)'].mean() if 'AOV (€)' in normal_data_combined.columns else 0
+                st.metric("Ø AOV", f"{avg_aov:.2f} €")
+            
+            st.subheader("B2B Traffic")
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            
+            # WICHTIG: Verwende die separaten aggregierten DataFrames, nicht das kombinierte
+            # aggregated_data_normal und aggregated_data_b2b haben die korrekten Conversion Rate Werte
+            # WICHTIG: Verwende die separaten aggregierten DataFrames, nicht das kombinierte
+            # aggregated_data_normal und aggregated_data_b2b haben die korrekten Conversion Rate Werte
+            # Prüfe ob die Variablen im globalen Scope verfügbar sind
+            try:
+                b2b_data_combined = aggregated_data_b2b.copy()
+            except NameError:
+                # Fallback: Filtere aus kombiniertem DataFrame
+                b2b_data_combined = aggregated_data[aggregated_data['Traffic_Typ'] == 'B2B'] if 'Traffic_Typ' in aggregated_data.columns else pd.DataFrame()
+            
+            # Finde Spalten für B2B Traffic
+            units_col_stat_b2b = find_column(filtered_df, ['Bestellte Einheiten – B2B'])
+            revenue_col_stat_b2b = find_column(filtered_df, ['Bestellsumme – B2B'])
+            views_col_stat_b2b = find_column(filtered_df, ['Seitenaufrufe – Summe – B2B', 'Sitzungen – Summe – B2B'])
+            
+            with col1:
+                # Verwende die aggregierten B2B-Daten direkt, die Spalte heißt jetzt "Bestellte Einheiten – B2B" (nicht umbenannt)
+                b2b_units_col_name = None
+                if 'Bestellte Einheiten – B2B' in b2b_data_combined.columns:
+                    b2b_units_col_name = 'Bestellte Einheiten – B2B'
+                elif 'Bestellte Einheiten - B2B' in b2b_data_combined.columns:
+                    b2b_units_col_name = 'Bestellte Einheiten - B2B'
+                
+                # Verwende die aggregierten B2B-Daten direkt (wie bei Normal)
+                # Die Spalte heißt "Bestellte Einheiten – B2B" statt "Bestellte Einheiten"
+                total_units = 0
+                b2b_units_col_found = None
+                
+                # Suche nach der B2B-Spalte (mit verschiedenen Leerzeichen-Varianten, inkl. Non-Breaking Space)
+                for col in b2b_data_combined.columns:
+                    if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                        # Prüfe ob es wirklich die B2B-Spalte ist (nicht die normale)
+                        if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                            b2b_units_col_found = col
+                            break
+                
+                if b2b_units_col_found:
+                    total_units = b2b_data_combined[b2b_units_col_found].sum()
+                else:
+                    # Wenn aggregierte Daten 0 sind oder Spalte nicht gefunden, verwende filtered_df
+                    # Suche auch in filtered_df nach der B2B-Spalte
+                    b2b_col_in_df = None
+                    for col in filtered_df.columns:
+                        if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                            if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                                b2b_col_in_df = col
+                                break
+                    
+                    if b2b_col_in_df:
+                        units_numeric = filtered_df[b2b_col_in_df].apply(parse_numeric_value)
+                        total_units = units_numeric.sum()
+                    elif units_col_stat_b2b and units_col_stat_b2b in filtered_df.columns:
+                        units_numeric = filtered_df[units_col_stat_b2b].apply(parse_numeric_value)
+                        total_units = units_numeric.sum()
+                
+                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+            
+            with col2:
+                if revenue_col_stat_b2b and revenue_col_stat_b2b in filtered_df.columns:
+                    revenue_numeric = filtered_df[revenue_col_stat_b2b].apply(parse_euro_value)
+                    total_revenue = revenue_numeric.sum()
+                else:
+                    total_revenue = b2b_data_combined['Umsatz'].sum() if 'Umsatz' in b2b_data_combined.columns else 0
+                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+            
+            with col3:
+                if views_col_stat_b2b and views_col_stat_b2b in filtered_df.columns:
+                    views_numeric = filtered_df[views_col_stat_b2b].apply(parse_numeric_value)
+                    total_views = views_numeric.sum()
+                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                else:
+                    total_views = b2b_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in b2b_data_combined.columns else (b2b_data_combined['Sitzungen'].sum() if 'Sitzungen' in b2b_data_combined.columns else 0)
+                    st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+            
+            with col4:
+                asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
+                unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
+                st.metric("Anzahl ASINs", f"{unique_asins}")
+            
+            with col5:
+                # Conversion Rate: Verwende vorhandene Spalte aus aggregierten Daten (mit Non-Breaking Space)
+                cr_col_b2b_stat = find_cr_column(b2b_data_combined, 'B2B')
+                if cr_col_b2b_stat and cr_col_b2b_stat in b2b_data_combined.columns:
+                    # Verwende die vorhandene CR-Spalte (bereits als Mittelwert aggregiert)
+                    avg_cr = b2b_data_combined[cr_col_b2b_stat].mean()
+                elif 'Conversion Rate (%)' in b2b_data_combined.columns:
+                    avg_cr = b2b_data_combined['Conversion Rate (%)'].mean()
+                else:
+                    avg_cr = 0
+                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+            
+            with col6:
+                avg_aov = b2b_data_combined['AOV (€)'].mean() if 'AOV (€)' in b2b_data_combined.columns else 0
+                st.metric("Ø AOV", f"{avg_aov:.2f} €")
+        else:
+            # Normale Ansicht (ein Traffic-Typ)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            
+            # Finde die tatsächlichen Spaltennamen (mit flexibler Suche)
+            units_col_stat = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B', 'Bestellte Einheiten - B2B'])
+            revenue_col_stat = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B', 'Bestellsumme - B2B'])
+            views_col_stat = find_column(filtered_df, [
+                'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
+                'Seitenaufrufe - Summe',
+                'Sitzungen – Summe',
+                'Sitzungen - Summe',
+                'Seitenaufrufe – Summe – B2B',
+                'Seitenaufrufe - Summe - B2B'
+            ])
+            
+            # Fallback falls Spalten nicht gefunden werden
+            if units_col_stat is None:
+                units_col_stat = 'Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B'
+            if revenue_col_stat is None:
+                revenue_col_stat = 'Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B'
+            if views_col_stat is None:
+                views_col_stat = 'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B'
+            
+            with col1:
+                # Verwende die aggregierten Daten direkt (wie bei Normal)
+                # Bei B2B: Die Spalte heißt "Bestellte Einheiten – B2B" statt "Bestellte Einheiten"
+                total_units = 0
+                if traffic_type_key == 'B2B':
+                    # Suche die B2B-Spalte - berücksichtige auch Non-Breaking Spaces (\xa0)
+                    b2b_units_col_found = None
+                    
+                    # Suche nach der B2B-Spalte (mit verschiedenen Leerzeichen-Varianten)
+                    for col in aggregated_data.columns:
+                        col_normalized = col.replace('\xa0', ' ').replace('–', '-').replace('—', '-')
+                        if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                            # Prüfe ob es wirklich die B2B-Spalte ist (nicht die normale)
+                            if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                                b2b_units_col_found = col
+                                break
+                    
+                    if b2b_units_col_found:
+                        total_units = aggregated_data[b2b_units_col_found].sum()
+                    else:
+                        # Wenn aggregierte Daten 0 sind oder Spalte nicht gefunden, verwende filtered_df
+                        # Suche auch in filtered_df nach der B2B-Spalte
+                        b2b_col_in_df = None
+                        for col in filtered_df.columns:
+                            if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                                if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                                    b2b_col_in_df = col
+                                    break
+                        
+                        if b2b_col_in_df:
+                            units_numeric = filtered_df[b2b_col_in_df].apply(parse_numeric_value)
+                            total_units = units_numeric.sum()
+                        elif units_col_stat and units_col_stat in filtered_df.columns:
+                            units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
+                            total_units = units_numeric.sum()
+                else:
+                    # Normaler Traffic: Verwende aggregierte Daten oder filtered_df
+                    if 'Bestellte Einheiten' in aggregated_data.columns:
+                        total_units = aggregated_data['Bestellte Einheiten'].sum()
+                    elif units_col_stat and units_col_stat in filtered_df.columns:
+                        units_numeric = filtered_df[units_col_stat].apply(parse_numeric_value)
+                        total_units = units_numeric.sum()
+                
+                st.metric("Gesamt bestellte Einheiten", f"{total_units:,.0f}")
+            
+            with col2:
+                if revenue_col_stat and revenue_col_stat in filtered_df.columns:
+                    revenue_numeric = filtered_df[revenue_col_stat].apply(parse_euro_value)
+                    total_revenue = revenue_numeric.sum()
+                else:
+                    total_revenue = 0
+                st.metric("Gesamtumsatz", f"{total_revenue:,.2f} €")
+            
+            with col3:
+                # Seitenaufrufe oder Sitzungen
+                if views_col_stat and views_col_stat in filtered_df.columns:
+                    # Konvertiere zu numerisch und berechne Summe
+                    views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
+                    total_views = views_numeric.sum()
+                    if total_views > 0:
+                        st.metric("Gesamt Seitenaufrufe", f"{total_views:,.0f}")
+                    elif 'Sitzungen – Summe' in filtered_df.columns:
+                        sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
+                        total_sessions = sessions_numeric.sum()
+                        st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
+                    else:
+                        st.metric("Gesamt Seitenaufrufe", "N/A")
                 elif 'Sitzungen – Summe' in filtered_df.columns:
                     sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
                     total_sessions = sessions_numeric.sum()
                     st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
                 else:
                     st.metric("Gesamt Seitenaufrufe", "N/A")
-            elif 'Sitzungen – Summe' in filtered_df.columns:
-                sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
-                total_sessions = sessions_numeric.sum()
-                st.metric("Gesamt Sitzungen", f"{total_sessions:,.0f}")
-            else:
-                st.metric("Gesamt Seitenaufrufe", "N/A")
-        
-        with col4:
-            asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
-            unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
-            st.metric("Anzahl ASINs", f"{unique_asins}")
-        
-        with col5:
-            # Durchschnittliche Conversion Rate
-            avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
-            st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
-        
-        with col6:
-            # Durchschnittlicher AOV
-            avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
-            st.metric("Ø AOV", f"{avg_aov:.2f} €")
+            
+            with col4:
+                asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
+                unique_asins = filtered_df[asin_col_metric].nunique() if asin_col_metric in filtered_df.columns else 0
+                st.metric("Anzahl ASINs", f"{unique_asins}")
+            
+            with col5:
+                # Durchschnittliche Conversion Rate
+                avg_cr = aggregated_data['Conversion Rate (%)'].mean() if 'Conversion Rate (%)' in aggregated_data.columns else 0
+                st.metric("Ø Conversion Rate", f"{avg_cr:.2f}%")
+            
+            with col6:
+                # Durchschnittlicher AOV
+                avg_aov = aggregated_data['AOV (€)'].mean() if 'AOV (€)' in aggregated_data.columns else 0
+                st.metric("Ø AOV", f"{avg_aov:.2f} €")
         
         st.divider()
         
@@ -1031,42 +1618,149 @@ if uploaded_files:
         else:
             third_title = 'Nicht verfügbar'
         
-        fig_combined = make_subplots(
-            rows=1, cols=3,
-            subplot_titles=('Bestellte Einheiten', 'Umsatz (€)', third_title),
-            specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}]]
-        )
-        
-        fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Bestellte Einheiten'], name='Einheiten'),
-            row=1, col=1
-        )
-        
-        fig_combined.add_trace(
-            go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Umsatz'], name='Umsatz', marker_color='green'),
-            row=1, col=2
-        )
-        
-        # Seitenaufrufe oder Sitzungen für dritte Spalte
-        if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
-            fig_combined.add_trace(
-                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
-                row=1, col=3
+        if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+            # Kombinierte Ansicht: Zeige beide Traffic-Typen nebeneinander
+            fig_combined = make_subplots(
+                rows=1, cols=3,
+                subplot_titles=('Bestellte Einheiten', 'Umsatz (€)', third_title),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}]]
             )
-        elif 'Sitzungen' in aggregated_data.columns:
+            
+            # Normal Traffic
+            normal_data = aggregated_data[aggregated_data['Traffic_Typ'] == 'Normal']
+            b2b_data = aggregated_data[aggregated_data['Traffic_Typ'] == 'B2B']
+            
+            # Bestellte Einheiten
             fig_combined.add_trace(
-                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=aggregated_data['Sitzungen'], name='Sitzungen', marker_color='blue'),
-                row=1, col=3
+                go.Bar(x=normal_data['Zeitraum'], y=normal_data['Bestellte Einheiten'], 
+                       name='Normal', marker_color='#1f77b4', showlegend=True),
+                row=1, col=1
             )
+            # Für B2B: Verwende die originale Spalte "Bestellte Einheiten – B2B" (mit Non-Breaking Space)
+            b2b_units_col_chart = None
+            # Suche nach der B2B-Spalte (berücksichtigt auch Non-Breaking Spaces)
+            for col in b2b_data.columns:
+                if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                    # Prüfe ob es wirklich die B2B-Spalte ist (nicht die normale)
+                    if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                        b2b_units_col_chart = col
+                        break
+            
+            if b2b_units_col_chart:
+                fig_combined.add_trace(
+                    go.Bar(x=b2b_data['Zeitraum'], y=b2b_data[b2b_units_col_chart], 
+                           name='B2B', marker_color='#ff7f0e', showlegend=True),
+                    row=1, col=1
+                )
+            else:
+                # Fallback falls Spalte nicht gefunden
+                fig_combined.add_trace(
+                    go.Bar(x=b2b_data['Zeitraum'], y=[0] * len(b2b_data), 
+                           name='B2B', marker_color='#ff7f0e', showlegend=True),
+                    row=1, col=1
+                )
+            
+            # Umsatz
+            fig_combined.add_trace(
+                go.Bar(x=normal_data['Zeitraum'], y=normal_data['Umsatz'], 
+                       name='Normal', marker_color='#1f77b4', showlegend=False),
+                row=1, col=2
+            )
+            fig_combined.add_trace(
+                go.Bar(x=b2b_data['Zeitraum'], y=b2b_data['Umsatz'], 
+                       name='B2B', marker_color='#ff7f0e', showlegend=False),
+                row=1, col=2
+            )
+            
+            # Seitenaufrufe oder Sitzungen
+            if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
+                fig_combined.add_trace(
+                    go.Bar(x=normal_data['Zeitraum'], y=normal_data['Seitenaufrufe'], 
+                           name='Normal', marker_color='#1f77b4', showlegend=False),
+                    row=1, col=3
+                )
+                fig_combined.add_trace(
+                    go.Bar(x=b2b_data['Zeitraum'], y=b2b_data['Seitenaufrufe'], 
+                           name='B2B', marker_color='#ff7f0e', showlegend=False),
+                    row=1, col=3
+                )
+            elif 'Sitzungen' in aggregated_data.columns:
+                fig_combined.add_trace(
+                    go.Bar(x=normal_data['Zeitraum'], y=normal_data['Sitzungen'], 
+                           name='Normal', marker_color='#1f77b4', showlegend=False),
+                    row=1, col=3
+                )
+                fig_combined.add_trace(
+                    go.Bar(x=b2b_data['Zeitraum'], y=b2b_data['Sitzungen'], 
+                           name='B2B', marker_color='#ff7f0e', showlegend=False),
+                    row=1, col=3
+                )
+            
+            fig_combined.update_layout(height=400, showlegend=True, barmode='group')
+            fig_combined.update_xaxes(title_text='Zeitraum')
+            st.plotly_chart(fig_combined, use_container_width=True)
         else:
-            fig_combined.add_trace(
-                go.Bar(x=aggregated_data['Zeitraum_Nr'], y=[0]*len(aggregated_data), name='Nicht verfügbar', marker_color='gray'),
-                row=1, col=3
+            # Normale Ansicht (ein Traffic-Typ)
+            fig_combined = make_subplots(
+                rows=1, cols=3,
+                subplot_titles=('Bestellte Einheiten', 'Umsatz (€)', third_title),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}]]
             )
-        
-        fig_combined.update_layout(height=400, showlegend=False)
-        fig_combined.update_xaxes(title_text='Zeitraum', tickmode='linear', tick0=1, dtick=1)
-        st.plotly_chart(fig_combined, use_container_width=True)
+            
+            # Bei B2B: Verwende die originale Spalte "Bestellte Einheiten – B2B" (mit Non-Breaking Space)
+            if traffic_type == 'B2B':
+                # Suche nach der B2B-Spalte (berücksichtigt auch Non-Breaking Spaces)
+                b2b_units_col_chart = None
+                for col in aggregated_data.columns:
+                    if 'bestellte' in col.lower() and 'einheiten' in col.lower() and 'b2b' in col.lower():
+                        # Prüfe ob es wirklich die B2B-Spalte ist (nicht die normale)
+                        if 'bestellte einheiten' in col.lower() and 'b2b' in col.lower():
+                            b2b_units_col_chart = col
+                            break
+                
+                if b2b_units_col_chart:
+                    fig_combined.add_trace(
+                        go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data[b2b_units_col_chart], name='Einheiten'),
+                        row=1, col=1
+                    )
+                else:
+                    # Fallback falls Spalte nicht gefunden
+                    fig_combined.add_trace(
+                        go.Bar(x=aggregated_data['Zeitraum'], y=[0] * len(aggregated_data), name='Einheiten'),
+                        row=1, col=1
+                    )
+            else:
+                # Normaler Traffic: Verwende "Bestellte Einheiten"
+                fig_combined.add_trace(
+                    go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Bestellte Einheiten'], name='Einheiten'),
+                    row=1, col=1
+                )
+            
+            fig_combined.add_trace(
+                go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Umsatz'], name='Umsatz', marker_color='green'),
+                row=1, col=2
+            )
+            
+            # Seitenaufrufe oder Sitzungen für dritte Spalte
+            if 'Seitenaufrufe' in aggregated_data.columns and aggregated_data['Seitenaufrufe'].sum() > 0:
+                fig_combined.add_trace(
+                    go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Seitenaufrufe'], name='Seitenaufrufe', marker_color='blue'),
+                    row=1, col=3
+                )
+            elif 'Sitzungen' in aggregated_data.columns:
+                fig_combined.add_trace(
+                    go.Bar(x=aggregated_data['Zeitraum'], y=aggregated_data['Sitzungen'], name='Sitzungen', marker_color='blue'),
+                    row=1, col=3
+                )
+            else:
+                fig_combined.add_trace(
+                    go.Bar(x=aggregated_data['Zeitraum'], y=[0]*len(aggregated_data), name='Nicht verfügbar', marker_color='gray'),
+                    row=1, col=3
+                )
+            
+            fig_combined.update_layout(height=400, showlegend=False)
+            fig_combined.update_xaxes(title_text='Zeitraum')
+            st.plotly_chart(fig_combined, use_container_width=True)
         
         # Neue KPIs
         st.subheader("📊 Zusätzliche KPIs")
@@ -1074,43 +1768,79 @@ if uploaded_files:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            fig_cr = px.line(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='Conversion Rate (%)',
-                title=f'Conversion Rate ({traffic_type})',
-                labels={'Conversion Rate (%)': 'Conversion Rate (%)', 'Zeitraum_Nr': 'Zeitraum'},
-                markers=True
-            )
-            fig_cr.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+                fig_cr = px.line(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='Conversion Rate (%)',
+                    color='Traffic_Typ',
+                    title='Conversion Rate (Kombiniert)',
+                    labels={'Conversion Rate (%)': 'Conversion Rate (%)', 'Zeitraum': 'Zeitraum', 'Traffic_Typ': 'Traffic-Typ'},
+                    markers=True,
+                    color_discrete_map={'Normal': '#1f77b4', 'B2B': '#ff7f0e'}
+                )
+            else:
+                fig_cr = px.line(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='Conversion Rate (%)',
+                    title=f'Conversion Rate ({traffic_type})',
+                    labels={'Conversion Rate (%)': 'Conversion Rate (%)', 'Zeitraum': 'Zeitraum'},
+                    markers=True
+                )
+                fig_cr.update_traces(line_color='purple', marker_color='purple')
+            fig_cr.update_layout(height=300)
             fig_cr.update_xaxes(title_text='Zeitraum')
-            fig_cr.update_traces(line_color='purple', marker_color='purple')
             st.plotly_chart(fig_cr, use_container_width=True)
         
         with col2:
-            fig_aov = px.bar(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='AOV (€)',
-                title=f'Average Order Value ({traffic_type})',
-                labels={'AOV (€)': 'AOV (€)', 'Zeitraum_Nr': 'Zeitraum'}
-            )
-            fig_aov.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+                fig_aov = px.bar(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='AOV (€)',
+                    color='Traffic_Typ',
+                    title='Average Order Value (Kombiniert)',
+                    labels={'AOV (€)': 'AOV (€)', 'Zeitraum': 'Zeitraum', 'Traffic_Typ': 'Traffic-Typ'},
+                    barmode='group',
+                    color_discrete_map={'Normal': '#1f77b4', 'B2B': '#ff7f0e'}
+                )
+            else:
+                fig_aov = px.bar(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='AOV (€)',
+                    title=f'Average Order Value ({traffic_type})',
+                    labels={'AOV (€)': 'AOV (€)', 'Zeitraum': 'Zeitraum'}
+                )
+                fig_aov.update_traces(marker_color='orange')
+            fig_aov.update_layout(height=300)
             fig_aov.update_xaxes(title_text='Zeitraum')
-            fig_aov.update_traces(marker_color='orange')
             st.plotly_chart(fig_aov, use_container_width=True)
         
         with col3:
-            fig_rps = px.bar(
-                aggregated_data,
-                x='Zeitraum_Nr',
-                y='Revenue per Session (€)',
-                title=f'Revenue per Session ({traffic_type})',
-                labels={'Revenue per Session (€)': 'Revenue/Session (€)', 'Zeitraum_Nr': 'Zeitraum'}
-            )
-            fig_rps.update_layout(height=300, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+            if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+                fig_rps = px.bar(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='Revenue per Session (€)',
+                    color='Traffic_Typ',
+                    title='Revenue per Session (Kombiniert)',
+                    labels={'Revenue per Session (€)': 'Revenue/Session (€)', 'Zeitraum': 'Zeitraum', 'Traffic_Typ': 'Traffic-Typ'},
+                    barmode='group',
+                    color_discrete_map={'Normal': '#1f77b4', 'B2B': '#ff7f0e'}
+                )
+            else:
+                fig_rps = px.bar(
+                    aggregated_data,
+                    x='Zeitraum',
+                    y='Revenue per Session (€)',
+                    title=f'Revenue per Session ({traffic_type})',
+                    labels={'Revenue per Session (€)': 'Revenue/Session (€)', 'Zeitraum': 'Zeitraum'}
+                )
+                fig_rps.update_traces(marker_color='teal')
+            fig_rps.update_layout(height=300)
             fig_rps.update_xaxes(title_text='Zeitraum')
-            fig_rps.update_traces(marker_color='teal')
             st.plotly_chart(fig_rps, use_container_width=True)
         
         # Mobile vs Browser Performance (nur wenn Daten verfügbar)
@@ -1158,8 +1888,8 @@ if uploaded_files:
                     mobile_browser_pct['Mobile %'] = (mobile_browser_pct['Mobile Sitzungen'] / total_sessions.replace(0, np.nan) * 100).fillna(0)
                     mobile_browser_pct['Browser %'] = (mobile_browser_pct['Browser Sitzungen'] / total_sessions.replace(0, np.nan) * 100).fillna(0)
                     
-                    mobile_browser_pct_data = mobile_browser_pct[['Zeitraum_Nr', 'Mobile %', 'Browser %']].melt(
-                        id_vars='Zeitraum_Nr',
+                    mobile_browser_pct_data = mobile_browser_pct[['Zeitraum', 'Mobile %', 'Browser %']].melt(
+                        id_vars='Zeitraum',
                         value_vars=['Mobile %', 'Browser %'],
                         var_name='Gerät',
                         value_name='Anteil (%)'
@@ -1167,14 +1897,14 @@ if uploaded_files:
                     
                     fig_mobile_browser_pct = px.bar(
                         mobile_browser_pct_data,
-                        x='Zeitraum_Nr',
+                        x='Zeitraum',
                         y='Anteil (%)',
                         color='Gerät',
                         title=f'Mobile vs Browser Anteil ({traffic_type})',
-                        labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum_Nr': 'Zeitraum'},
+                        labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum': 'Zeitraum'},
                         color_discrete_map={'Mobile %': '#1f77b4', 'Browser %': '#ff7f0e'}
                     )
-                    fig_mobile_browser_pct.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1), barmode='stack')
+                    fig_mobile_browser_pct.update_layout(height=350, barmode='stack')
                     fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
                     st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
             # Wenn keine Daten vorhanden, wird die Sektion einfach nicht angezeigt
@@ -1182,9 +1912,127 @@ if uploaded_files:
         # Zusammenfassung
         st.header("📝 Zusammenfassung")
         
-        if len(aggregated_data) > 1:
+        # Bei kombinierter Ansicht: Kombiniere Normal und B2B Daten für Zusammenfassung
+        if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+            # Kombiniere Normal und B2B Daten pro Zeitraum
+            # Prüfe welche Einheiten-Spalten vorhanden sind
+            agg_dict_combined = {
+                'Umsatz': 'sum',
+                'Seitenaufrufe': 'sum' if 'Seitenaufrufe' in aggregated_data.columns else 'first',
+                'Sitzungen': 'sum' if 'Sitzungen' in aggregated_data.columns else 'first',
+                'Bestellungen': 'sum' if 'Bestellungen' in aggregated_data.columns else 'first',
+            }
+            
+            # Conversion Rate Spalten als Mittelwert aggregieren (wenn vorhanden, mit Non-Breaking Space)
+            cr_col_normal_combined = find_cr_column(aggregated_data, 'normal')
+            cr_col_b2b_combined = find_cr_column(aggregated_data, 'B2B')
+            if cr_col_normal_combined and cr_col_normal_combined in aggregated_data.columns:
+                agg_dict_combined[cr_col_normal_combined] = 'mean'
+            if cr_col_b2b_combined and cr_col_b2b_combined in aggregated_data.columns:
+                agg_dict_combined[cr_col_b2b_combined] = 'mean'
+            
+            # Bei kombinierten Daten: Summiere Normal und B2B Einheiten separat
+            # WICHTIG: Wir müssen die Werte aus den separaten Normal- und B2B-Zeilen nehmen!
+            normal_units_col_agg = 'Bestellte Einheiten' if 'Bestellte Einheiten' in aggregated_data.columns else None
+            b2b_col_agg = find_b2b_units_column(aggregated_data)
+            
+            # Erstelle summary_data durch Gruppierung (ohne Einheiten-Spalten, die werden separat berechnet)
+            summary_data = aggregated_data.groupby('Zeitraum').agg(agg_dict_combined).reset_index()
+            
+            # Berechne Gesamt-Einheiten separat: Normal (aus Normal-Zeilen) + B2B (aus B2B-Zeilen)
+            if normal_units_col_agg and b2b_col_agg:
+                summary_data['Bestellte Einheiten (Gesamt)'] = 0
+                for period in summary_data['Zeitraum']:
+                    # Hole Normal-Wert für diesen Zeitraum (nur aus Normal-Zeilen)
+                    normal_rows = aggregated_data[(aggregated_data['Zeitraum'] == period) & (aggregated_data['Traffic_Typ'] == 'Normal')]
+                    normal_value = normal_rows[normal_units_col_agg].sum() if len(normal_rows) > 0 and normal_units_col_agg in normal_rows.columns else 0
+                    
+                    # Hole B2B-Wert für diesen Zeitraum (nur aus B2B-Zeilen)
+                    b2b_rows = aggregated_data[(aggregated_data['Zeitraum'] == period) & (aggregated_data['Traffic_Typ'] == 'B2B')]
+                    b2b_value = b2b_rows[b2b_col_agg].sum() if len(b2b_rows) > 0 and b2b_col_agg in b2b_rows.columns else 0
+                    
+                    # Setze Gesamt-Wert
+                    summary_data.loc[summary_data['Zeitraum'] == period, 'Bestellte Einheiten (Gesamt)'] = normal_value + b2b_value
+            elif normal_units_col_agg:
+                # Nur Normal vorhanden
+                normal_rows = aggregated_data[aggregated_data['Traffic_Typ'] == 'Normal']
+                if len(normal_rows) > 0:
+                    summary_data = summary_data.merge(
+                        normal_rows.groupby('Zeitraum')[normal_units_col_agg].sum().reset_index().rename(columns={normal_units_col_agg: 'Bestellte Einheiten (Gesamt)'}),
+                        on='Zeitraum',
+                        how='left'
+                    )
+            elif b2b_col_agg:
+                # Nur B2B vorhanden
+                b2b_rows = aggregated_data[aggregated_data['Traffic_Typ'] == 'B2B']
+                if len(b2b_rows) > 0:
+                    summary_data = summary_data.merge(
+                        b2b_rows.groupby('Zeitraum')[b2b_col_agg].sum().reset_index().rename(columns={b2b_col_agg: 'Bestellte Einheiten (Gesamt)'}),
+                        on='Zeitraum',
+                        how='left'
+                    )
+            
+            # Berechne KPIs neu aus kombinierten Daten
+            # Die Gesamt-Einheiten-Spalte wurde bereits oben berechnet
+            # Verwende sie für die KPI-Berechnung
+            if 'Bestellte Einheiten (Gesamt)' in summary_data.columns:
+                units_col_summary = 'Bestellte Einheiten (Gesamt)'
+            else:
+                # Fallback: Versuche einzelne Spalten zu finden
+                normal_units_col = 'Bestellte Einheiten' if 'Bestellte Einheiten' in summary_data.columns else None
+                b2b_col_summary = find_b2b_units_column(summary_data)
+                if normal_units_col and b2b_col_summary:
+                    # Beide vorhanden: Summiere sie
+                    summary_data['Bestellte Einheiten (Gesamt)'] = (
+                        summary_data[normal_units_col].fillna(0) + summary_data[b2b_col_summary].fillna(0)
+                    )
+                    units_col_summary = 'Bestellte Einheiten (Gesamt)'
+                elif b2b_col_summary:
+                    units_col_summary = b2b_col_summary
+                elif normal_units_col:
+                    units_col_summary = normal_units_col
+                else:
+                    units_col_summary = None
+            
+            # Conversion Rate: Verwende vorhandene Spalten oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+            cr_col_normal_summary = find_cr_column(summary_data, 'normal')
+            cr_col_b2b_summary = find_cr_column(summary_data, 'B2B')
+            
+            if cr_col_normal_summary and cr_col_normal_summary in summary_data.columns:
+                # Verwende Normal Conversion Rate Spalte
+                summary_data['Conversion Rate (%)'] = summary_data[cr_col_normal_summary].fillna(0)
+            elif cr_col_b2b_summary and cr_col_b2b_summary in summary_data.columns:
+                # Verwende B2B Conversion Rate Spalte
+                summary_data['Conversion Rate (%)'] = summary_data[cr_col_b2b_summary].fillna(0)
+            elif 'Sitzungen' in summary_data.columns and 'Bestellungen' in summary_data.columns:
+                # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+                summary_data['Conversion Rate (%)'] = (
+                    (summary_data['Bestellungen'] / summary_data['Sitzungen'].replace(0, np.nan) * 100)
+                    .fillna(0)
+                    .replace([np.inf, -np.inf], 0)
+                )
+            if 'Bestellungen' in summary_data.columns and 'Umsatz' in summary_data.columns:
+                summary_data['AOV (€)'] = (
+                    (summary_data['Umsatz'] / summary_data['Bestellungen'].replace(0, np.nan))
+                    .fillna(0)
+                    .replace([np.inf, -np.inf], 0)
+                )
+            if 'Sitzungen' in summary_data.columns and 'Umsatz' in summary_data.columns:
+                summary_data['Revenue per Session (€)'] = (
+                    (summary_data['Umsatz'] / summary_data['Sitzungen'].replace(0, np.nan))
+                    .fillna(0)
+                    .replace([np.inf, -np.inf], 0)
+                )
+            
+            # Verwende kombinierte Daten für Zusammenfassung
+            summary_aggregated_data = summary_data.copy()
+        else:
+            # Bei Einzelansicht: Verwende Daten wie bisher
+            summary_aggregated_data = aggregated_data.copy()
+        
+        if len(summary_aggregated_data) > 1:
             # Zeitraum-Auswahl für Vergleich
-            available_periods = aggregated_data['Zeitraum'].unique().tolist()
+            available_periods = summary_aggregated_data['Zeitraum'].unique().tolist()
             available_periods.sort()
             
             col1, col2 = st.columns(2)
@@ -1206,11 +2054,13 @@ if uploaded_files:
                 )
             
             # Filtere Daten für die ausgewählten Zeiträume
-            previous_data = aggregated_data[aggregated_data['Zeitraum'] == previous_period].copy()
-            current_data = aggregated_data[aggregated_data['Zeitraum'] == current_period].copy()
+            previous_data = summary_aggregated_data[summary_aggregated_data['Zeitraum'] == previous_period].copy()
+            current_data = summary_aggregated_data[summary_aggregated_data['Zeitraum'] == current_period].copy()
             
             if len(previous_data) > 0 and len(current_data) > 0:
-                summary = generate_summary(current_data, previous_data, traffic_type_key)
+                # Bei kombinierter Ansicht: Verwende 'normal' als traffic_type (ist nur für Formatierung)
+                summary_traffic_type = 'normal' if show_combined else traffic_type_key
+                summary = generate_summary(current_data, previous_data, summary_traffic_type)
             else:
                 summary = "Fehler beim Laden der Zeiträume. Bitte wählen Sie andere Zeiträume aus."
         else:
@@ -1229,7 +2079,87 @@ if uploaded_files:
             else:
                 latest_df = filtered_df.copy()
             
-            top_asins, flop_asins = get_top_flop_asins(latest_df, traffic_type_key)
+            # Bei kombinierter Ansicht: Zeige Top/Flop für beide Traffic-Typen
+            if show_combined:
+                top_asins_normal, flop_asins_normal = get_top_flop_asins(latest_df, 'normal')
+                top_asins_b2b, flop_asins_b2b = get_top_flop_asins(latest_df, 'B2B')
+                
+                # Zeige beide Traffic-Typen
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("### 🟢 Top ASIN Normal Traffic (nach Umsatz)")
+                    if top_asins_normal is not None and len(top_asins_normal) > 0:
+                        row = top_asins_normal.iloc[0]
+                        with st.container():
+                            st.markdown(f"**{row['ASIN']}**")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            with col_b:
+                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                    else:
+                        st.info("Keine Daten verfügbar")
+                
+                with col2:
+                    st.markdown("### 🟢 Top ASIN B2B Traffic (nach Umsatz)")
+                    if top_asins_b2b is not None and len(top_asins_b2b) > 0:
+                        row = top_asins_b2b.iloc[0]
+                        with st.container():
+                            st.markdown(f"**{row['ASIN']}**")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            with col_b:
+                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                    else:
+                        st.info("Keine Daten verfügbar")
+                
+                st.divider()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("### 🔴 Flop ASIN Normal Traffic (nach Umsatz)")
+                    if flop_asins_normal is not None and len(flop_asins_normal) > 0:
+                        row = flop_asins_normal.iloc[0]
+                        with st.container():
+                            st.markdown(f"**{row['ASIN']}**")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            with col_b:
+                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                    else:
+                        st.info("Keine Daten verfügbar")
+                
+                with col2:
+                    st.markdown("### 🔴 Flop ASIN B2B Traffic (nach Umsatz)")
+                    if flop_asins_b2b is not None and len(flop_asins_b2b) > 0:
+                        row = flop_asins_b2b.iloc[0]
+                        with st.container():
+                            st.markdown(f"**{row['ASIN']}**")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Umsatz", f"{row['Umsatz']:,.2f} €")
+                                st.metric("Einheiten", f"{row['Einheiten']:.0f}")
+                            with col_b:
+                                st.metric("Conversion Rate", f"{row['Conversion Rate (%)']:.2f}%")
+                                st.metric("AOV", f"{row['AOV (€)']:.2f} €")
+                    else:
+                        st.info("Keine Daten verfügbar")
+                
+                # Setze top_asins und flop_asins für die weitere Verarbeitung (falls benötigt)
+                top_asins = top_asins_normal
+                flop_asins = flop_asins_normal
+            else:
+                top_asins, flop_asins = get_top_flop_asins(latest_df, traffic_type_key)
             
             if top_asins is not None and len(top_asins) > 0:
                 col1, col2 = st.columns(2)
@@ -1273,39 +2203,103 @@ if uploaded_files:
         # Detaillierte Tabelle
         st.header("📋 Detaillierte Daten")
         
-        # Finde die tatsächlichen Spaltennamen für die Anzeige
-        units_col_display = find_column(filtered_df, ['Bestellte Einheiten' if traffic_type_key == 'normal' else 'Bestellte Einheiten – B2B'])
-        revenue_col_display = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B'])
-        views_col_display = find_column(filtered_df, [
-            'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
-            'Sitzungen – Summe',
-            'Sitzungen - Summe'
-        ])
-        
-        display_columns = ['Zeitraum']
-        
-        # Füge ASIN-Spalten nur hinzu, wenn vorhanden (nicht bei Account-Level)
-        if '(Übergeordnete) ASIN' in filtered_df.columns:
-            display_columns.append('(Übergeordnete) ASIN')
-        if '(Untergeordnete) ASIN' in filtered_df.columns:
-            display_columns.append('(Untergeordnete) ASIN')
-        if 'Titel' in filtered_df.columns:
-            display_columns.append('Titel')
-        
-        # Füge dynamisch gefundene Spalten hinzu
-        if units_col_display:
-            display_columns.append(units_col_display)
-        if revenue_col_display:
-            display_columns.append(revenue_col_display)
-        if views_col_display:
-            display_columns.append(views_col_display)
-        
-        available_columns = [col for col in display_columns if col in filtered_df.columns]
-        st.dataframe(
-            filtered_df[available_columns],
-            use_container_width=True,
-            height=400
-        )
+        if show_combined:
+            # Bei kombinierter Ansicht: Zeige beide Traffic-Typen in separaten Tabs
+            tab1, tab2 = st.tabs(["Normal Traffic", "B2B Traffic"])
+            
+            with tab1:
+                # Normal Traffic Spalten
+                units_col_display_normal = find_column(filtered_df, ['Bestellte Einheiten'])
+                revenue_col_display_normal = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz'])
+                views_col_display_normal = find_column(filtered_df, ['Seitenaufrufe – Summe', 'Sitzungen – Summe'])
+                
+                display_columns_normal = ['Zeitraum']
+                if '(Übergeordnete) ASIN' in filtered_df.columns:
+                    display_columns_normal.append('(Übergeordnete) ASIN')
+                if '(Untergeordnete) ASIN' in filtered_df.columns:
+                    display_columns_normal.append('(Untergeordnete) ASIN')
+                if 'Titel' in filtered_df.columns:
+                    display_columns_normal.append('Titel')
+                if units_col_display_normal:
+                    display_columns_normal.append(units_col_display_normal)
+                if revenue_col_display_normal:
+                    display_columns_normal.append(revenue_col_display_normal)
+                if views_col_display_normal:
+                    display_columns_normal.append(views_col_display_normal)
+                
+                available_columns_normal = [col for col in display_columns_normal if col in filtered_df.columns]
+                st.dataframe(
+                    filtered_df[available_columns_normal],
+                    use_container_width=True,
+                    height=400
+                )
+            
+            with tab2:
+                # B2B Traffic Spalten - verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+                units_col_display_b2b = find_b2b_units_column(filtered_df)
+                revenue_col_display_b2b = find_column(filtered_df, ['Bestellsumme – B2B', 'Bestellsumme - B2B'])
+                views_col_display_b2b = find_column(filtered_df, ['Seitenaufrufe – Summe – B2B', 'Sitzungen – Summe – B2B'])
+                
+                display_columns_b2b = ['Zeitraum']
+                if '(Übergeordnete) ASIN' in filtered_df.columns:
+                    display_columns_b2b.append('(Übergeordnete) ASIN')
+                if '(Untergeordnete) ASIN' in filtered_df.columns:
+                    display_columns_b2b.append('(Untergeordnete) ASIN')
+                if 'Titel' in filtered_df.columns:
+                    display_columns_b2b.append('Titel')
+                if units_col_display_b2b:
+                    display_columns_b2b.append(units_col_display_b2b)
+                if revenue_col_display_b2b:
+                    display_columns_b2b.append(revenue_col_display_b2b)
+                if views_col_display_b2b:
+                    display_columns_b2b.append(views_col_display_b2b)
+                
+                available_columns_b2b = [col for col in display_columns_b2b if col in filtered_df.columns]
+                st.dataframe(
+                    filtered_df[available_columns_b2b],
+                    use_container_width=True,
+                    height=400
+                )
+        else:
+            # Einzelansicht: Zeige nur einen Traffic-Typ
+            # Finde die tatsächlichen Spaltennamen für die Anzeige
+            if traffic_type_key == 'B2B':
+                # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
+                units_col_display = find_b2b_units_column(filtered_df)
+            else:
+                units_col_display = find_column(filtered_df, ['Bestellte Einheiten'])
+            revenue_col_display = find_column(filtered_df, ['Durch bestellte Produkte erzielter Umsatz' if traffic_type_key == 'normal' else 'Bestellsumme – B2B', 'Bestellsumme - B2B'])
+            views_col_display = find_column(filtered_df, [
+                'Seitenaufrufe – Summe' if traffic_type_key == 'normal' else 'Seitenaufrufe – Summe – B2B',
+                'Seitenaufrufe - Summe - B2B',
+                'Sitzungen – Summe',
+                'Sitzungen - Summe'
+            ])
+            
+            display_columns = ['Zeitraum']
+            
+            # Füge ASIN-Spalten nur hinzu, wenn vorhanden (nicht bei Account-Level)
+            if '(Übergeordnete) ASIN' in filtered_df.columns:
+                display_columns.append('(Übergeordnete) ASIN')
+            if '(Untergeordnete) ASIN' in filtered_df.columns:
+                display_columns.append('(Untergeordnete) ASIN')
+            if 'Titel' in filtered_df.columns:
+                display_columns.append('Titel')
+            
+            # Füge dynamisch gefundene Spalten hinzu
+            if units_col_display:
+                display_columns.append(units_col_display)
+            if revenue_col_display:
+                display_columns.append(revenue_col_display)
+            if views_col_display:
+                display_columns.append(views_col_display)
+            
+            available_columns = [col for col in display_columns if col in filtered_df.columns]
+            st.dataframe(
+                filtered_df[available_columns],
+                use_container_width=True,
+                height=400
+            )
     else:
         st.error("Keine Daten konnten geladen werden. Bitte überprüfe die CSV-Dateien.")
 else:
