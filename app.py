@@ -1018,72 +1018,72 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         units_change = current[units_col_name] - previous[units_col_name]
         units_pct = ((current[units_col_name] / previous[units_col_name] - 1) * 100) if previous[units_col_name] > 0 else 0
         if units_change > 0:
-            summary_parts.append(f"✅ Die bestellten Einheiten sind von {previous[units_col_name]:.0f} auf {current[units_col_name]:.0f} gestiegen (+{units_change:.0f} Einheiten, {units_pct:+.1f}%).")
+            summary_parts.append(f"**✅ Bestellte Einheiten:** {previous[units_col_name]:.0f} → **{current[units_col_name]:.0f}** | **+{units_change:.0f}** ({units_pct:+.1f}%)")
         elif units_change < 0:
-            summary_parts.append(f"❌ Die bestellten Einheiten sind von {previous[units_col_name]:.0f} auf {current[units_col_name]:.0f} gesunken ({units_change:.0f} Einheiten, {units_pct:+.1f}%).")
+            summary_parts.append(f"**❌ Bestellte Einheiten:** {previous[units_col_name]:.0f} → **{current[units_col_name]:.0f}** | **{units_change:.0f}** ({units_pct:+.1f}%)")
         else:
-            summary_parts.append(f"➡️ Die bestellten Einheiten sind unverändert bei {current[units_col_name]:.0f} Einheiten.")
+            summary_parts.append(f"**➡️ Bestellte Einheiten:** **{current[units_col_name]:.0f}** (unverändert)")
     
     # Umsatz
     revenue_change = current['Umsatz'] - previous['Umsatz']
     revenue_pct = ((current['Umsatz'] / previous['Umsatz'] - 1) * 100) if previous['Umsatz'] > 0 else 0
     if revenue_change > 0:
-        summary_parts.append(f"✅ Der Umsatz ist von {previous['Umsatz']:,.2f} € auf {current['Umsatz']:,.2f} € gestiegen (+{revenue_change:,.2f} €, {revenue_pct:+.1f}%).")
+        summary_parts.append(f"**✅ Umsatz:** {previous['Umsatz']:,.2f} € → **{current['Umsatz']:,.2f} €** | **+{revenue_change:,.2f} €** ({revenue_pct:+.1f}%)")
     elif revenue_change < 0:
-        summary_parts.append(f"❌ Der Umsatz ist von {previous['Umsatz']:,.2f} € auf {current['Umsatz']:,.2f} € gesunken ({revenue_change:,.2f} €, {revenue_pct:+.1f}%).")
+        summary_parts.append(f"**❌ Umsatz:** {previous['Umsatz']:,.2f} € → **{current['Umsatz']:,.2f} €** | **{revenue_change:,.2f} €** ({revenue_pct:+.1f}%)")
     else:
-        summary_parts.append(f"➡️ Der Umsatz ist unverändert bei {current['Umsatz']:,.2f} €.")
+        summary_parts.append(f"**➡️ Umsatz:** **{current['Umsatz']:,.2f} €** (unverändert)")
     
     # Seitenaufrufe (nur wenn verfügbar)
     if 'Seitenaufrufe' in current and 'Seitenaufrufe' in previous:
         views_change = current['Seitenaufrufe'] - previous['Seitenaufrufe']
         views_pct = ((current['Seitenaufrufe'] / previous['Seitenaufrufe'] - 1) * 100) if previous['Seitenaufrufe'] > 0 else 0
         if views_change > 0:
-            summary_parts.append(f"✅ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gestiegen (+{views_change:.0f}, {views_pct:+.1f}%).")
+            summary_parts.append(f"**✅ Seitenaufrufe:** {previous['Seitenaufrufe']:.0f} → **{current['Seitenaufrufe']:.0f}** | **+{views_change:.0f}** ({views_pct:+.1f}%)")
         elif views_change < 0:
-            summary_parts.append(f"❌ Die Seitenaufrufe sind von {previous['Seitenaufrufe']:.0f} auf {current['Seitenaufrufe']:.0f} gesunken ({views_change:.0f}, {views_pct:+.1f}%).")
+            summary_parts.append(f"**❌ Seitenaufrufe:** {previous['Seitenaufrufe']:.0f} → **{current['Seitenaufrufe']:.0f}** | **{views_change:.0f}** ({views_pct:+.1f}%)")
         else:
-            summary_parts.append(f"➡️ Die Seitenaufrufe sind unverändert bei {current['Seitenaufrufe']:.0f}.")
+            summary_parts.append(f"**➡️ Seitenaufrufe:** **{current['Seitenaufrufe']:.0f}** (unverändert)")
     elif 'Sitzungen' in current and 'Sitzungen' in previous:
         # Falls keine Seitenaufrufe, verwende Sitzungen
         sessions_change = current['Sitzungen'] - previous['Sitzungen']
         sessions_pct = ((current['Sitzungen'] / previous['Sitzungen'] - 1) * 100) if previous['Sitzungen'] > 0 else 0
         if sessions_change > 0:
-            summary_parts.append(f"✅ Die Sitzungen sind von {previous['Sitzungen']:.0f} auf {current['Sitzungen']:.0f} gestiegen (+{sessions_change:.0f}, {sessions_pct:+.1f}%).")
+            summary_parts.append(f"**✅ Sitzungen:** {previous['Sitzungen']:.0f} → **{current['Sitzungen']:.0f}** | **+{sessions_change:.0f}** ({sessions_pct:+.1f}%)")
         elif sessions_change < 0:
-            summary_parts.append(f"❌ Die Sitzungen sind von {previous['Sitzungen']:.0f} auf {current['Sitzungen']:.0f} gesunken ({sessions_change:.0f}, {sessions_pct:+.1f}%).")
+            summary_parts.append(f"**❌ Sitzungen:** {previous['Sitzungen']:.0f} → **{current['Sitzungen']:.0f}** | **{sessions_change:.0f}** ({sessions_pct:+.1f}%)")
         else:
-            summary_parts.append(f"➡️ Die Sitzungen sind unverändert bei {current['Sitzungen']:.0f}.")
+            summary_parts.append(f"**➡️ Sitzungen:** **{current['Sitzungen']:.0f}** (unverändert)")
     
     # Conversion Rate
     if 'Conversion Rate (%)' in current and 'Conversion Rate (%)' in previous:
         cr_change = current['Conversion Rate (%)'] - previous['Conversion Rate (%)']
         if cr_change > 0:
-            summary_parts.append(f"✅ Die Conversion Rate ist von {previous['Conversion Rate (%)']:.2f}% auf {current['Conversion Rate (%)']:.2f}% gestiegen (+{cr_change:.2f} Prozentpunkte).")
+            summary_parts.append(f"**✅ Conversion Rate:** {previous['Conversion Rate (%)']:.2f}% → **{current['Conversion Rate (%)']:.2f}%** | **+{cr_change:.2f} PP**")
         elif cr_change < 0:
-            summary_parts.append(f"❌ Die Conversion Rate ist von {previous['Conversion Rate (%)']:.2f}% auf {current['Conversion Rate (%)']:.2f}% gesunken ({cr_change:.2f} Prozentpunkte).")
+            summary_parts.append(f"**❌ Conversion Rate:** {previous['Conversion Rate (%)']:.2f}% → **{current['Conversion Rate (%)']:.2f}%** | **{cr_change:.2f} PP**")
         else:
-            summary_parts.append(f"➡️ Die Conversion Rate ist unverändert bei {current['Conversion Rate (%)']:.2f}%.")
+            summary_parts.append(f"**➡️ Conversion Rate:** **{current['Conversion Rate (%)']:.2f}%** (unverändert)")
     
     # AOV
     if 'AOV (€)' in current and 'AOV (€)' in previous:
         aov_change = current['AOV (€)'] - previous['AOV (€)']
         if aov_change > 0:
-            summary_parts.append(f"✅ Der Average Order Value ist von {previous['AOV (€)']:.2f} € auf {current['AOV (€)']:.2f} € gestiegen (+{aov_change:.2f} €).")
+            summary_parts.append(f"**✅ AOV:** {previous['AOV (€)']:.2f} € → **{current['AOV (€)']:.2f} €** | **+{aov_change:.2f} €**")
         elif aov_change < 0:
-            summary_parts.append(f"❌ Der Average Order Value ist von {previous['AOV (€)']:.2f} € auf {current['AOV (€)']:.2f} € gesunken ({aov_change:.2f} €).")
+            summary_parts.append(f"**❌ AOV:** {previous['AOV (€)']:.2f} € → **{current['AOV (€)']:.2f} €** | **{aov_change:.2f} €**")
         else:
-            summary_parts.append(f"➡️ Der Average Order Value ist unverändert bei {current['AOV (€)']:.2f} €.")
+            summary_parts.append(f"**➡️ AOV:** **{current['AOV (€)']:.2f} €** (unverändert)")
     
     # Revenue per Session
     if 'Revenue per Session (€)' in current and 'Revenue per Session (€)' in previous:
         rps_change = current['Revenue per Session (€)'] - previous['Revenue per Session (€)']
         if rps_change > 0:
-            summary_parts.append(f"✅ Der Revenue per Session ist von {previous['Revenue per Session (€)']:.2f} € auf {current['Revenue per Session (€)']:.2f} € gestiegen (+{rps_change:.2f} €).")
+            summary_parts.append(f"**✅ Revenue per Session:** {previous['Revenue per Session (€)']:.2f} € → **{current['Revenue per Session (€)']:.2f} €** | **+{rps_change:.2f} €**")
         elif rps_change < 0:
-            summary_parts.append(f"❌ Der Revenue per Session ist von {previous['Revenue per Session (€)']:.2f} € auf {current['Revenue per Session (€)']:.2f} € gesunken ({rps_change:.2f} €).")
+            summary_parts.append(f"**❌ Revenue per Session:** {previous['Revenue per Session (€)']:.2f} € → **{current['Revenue per Session (€)']:.2f} €** | **{rps_change:.2f} €**")
         else:
-            summary_parts.append(f"➡️ Der Revenue per Session ist unverändert bei {current['Revenue per Session (€)']:.2f} €.")
+            summary_parts.append(f"**➡️ Revenue per Session:** **{current['Revenue per Session (€)']:.2f} €** (unverändert)")
     
     return "\n\n".join(summary_parts)
 
