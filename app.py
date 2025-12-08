@@ -67,6 +67,40 @@ def format_number_de(value, decimals=0):
             # Fallback falls Formatierung nicht wie erwartet
             return formatted.replace(".", ",")
 
+def format_percentage_de(value, decimals=1):
+    """Formatiert Prozentwerte im deutschen Format (Komma als Dezimaltrennzeichen)
+    
+    Args:
+        value: Prozentwert als Zahl (z.B. 10.5 für 10,5%)
+        decimals: Anzahl der Dezimalstellen (Standard: 1)
+    
+    Returns:
+        Formatierter String mit % (z.B. "+10,5%" oder "-5,2%")
+    """
+    if pd.isna(value) or value is None:
+        return "0%" if decimals == 0 else f"0,{'0' * decimals}%"
+    
+    # Konvertiere zu float
+    num = float(value)
+    
+    # Prüfe auf Infinity oder -Infinity
+    if np.isinf(num) or np.isnan(num):
+        return "0%" if decimals == 0 else f"0,{'0' * decimals}%"
+    
+    # Formatiere mit Komma als Dezimaltrennzeichen
+    if decimals == 0:
+        # Ganze Zahl: Kein Dezimaltrennzeichen
+        sign = "+" if num > 0 else ""
+        return f"{sign}{int(num)}%"
+    else:
+        # Dezimalzahl: Komma als Dezimaltrennzeichen
+        # Verwende format_number_de für die Formatierung, dann füge % hinzu
+        formatted = format_number_de(num, decimals)
+        # Füge + Zeichen hinzu, wenn positiv
+        if num > 0 and not formatted.startswith("+"):
+            formatted = "+" + formatted
+        return f"{formatted}%"
+
 def parse_euro_value(value):
     """Konvertiert Euro-Strings (z.B. '1.999,55 €' oder '368,14 €') zu Float"""
     if pd.isna(value) or value == '':
@@ -1293,9 +1327,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         units_change = current[units_col_name] - previous[units_col_name]
         units_pct = ((current[units_col_name] / previous[units_col_name] - 1) * 100) if previous[units_col_name] > 0 else 0
         if units_change > 0:
-            summary_parts.append(f"**✅ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **+{format_number_de(units_change, 0)}** ({units_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **+{format_number_de(units_change, 0)}** ({format_percentage_de(units_pct, 1)})")
         elif units_change < 0:
-            summary_parts.append(f"**❌ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **{format_number_de(units_change, 0)}** ({units_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Bestellte Einheiten:** {format_number_de(previous[units_col_name], 0)} → **{format_number_de(current[units_col_name], 0)}** | **{format_number_de(units_change, 0)}** ({format_percentage_de(units_pct, 1)})")
         else:
             summary_parts.append(f"**➡️ Bestellte Einheiten:** **{format_number_de(current[units_col_name], 0)}** (unverändert)")
     
@@ -1303,9 +1337,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
     revenue_change = current['Umsatz'] - previous['Umsatz']
     revenue_pct = ((current['Umsatz'] / previous['Umsatz'] - 1) * 100) if previous['Umsatz'] > 0 else 0
     if revenue_change > 0:
-        summary_parts.append(f"**✅ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **+{format_number_de(revenue_change, 2)} €** ({revenue_pct:+.1f}%)")
+        summary_parts.append(f"**✅ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **+{format_number_de(revenue_change, 2)} €** ({format_percentage_de(revenue_pct, 1)})")
     elif revenue_change < 0:
-        summary_parts.append(f"**❌ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **{format_number_de(revenue_change, 2)} €** ({revenue_pct:+.1f}%)")
+        summary_parts.append(f"**❌ Umsatz:** {format_number_de(previous['Umsatz'], 2)} € → **{format_number_de(current['Umsatz'], 2)} €** | **{format_number_de(revenue_change, 2)} €** ({format_percentage_de(revenue_pct, 1)})")
     else:
         summary_parts.append(f"**➡️ Umsatz:** **{format_number_de(current['Umsatz'], 2)} €** (unverändert)")
     
@@ -1314,9 +1348,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         views_change = current['Seitenaufrufe'] - previous['Seitenaufrufe']
         views_pct = ((current['Seitenaufrufe'] / previous['Seitenaufrufe'] - 1) * 100) if previous['Seitenaufrufe'] > 0 else 0
         if views_change > 0:
-            summary_parts.append(f"**✅ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **+{format_number_de(views_change, 0)}** ({views_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **+{format_number_de(views_change, 0)}** ({format_percentage_de(views_pct, 1)})")
         elif views_change < 0:
-            summary_parts.append(f"**❌ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **{format_number_de(views_change, 0)}** ({views_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Seitenaufrufe:** {format_number_de(previous['Seitenaufrufe'], 0)} → **{format_number_de(current['Seitenaufrufe'], 0)}** | **{format_number_de(views_change, 0)}** ({format_percentage_de(views_pct, 1)})")
         else:
             summary_parts.append(f"**➡️ Seitenaufrufe:** **{format_number_de(current['Seitenaufrufe'], 0)}** (unverändert)")
     elif 'Sitzungen' in current and 'Sitzungen' in previous:
@@ -1324,9 +1358,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         sessions_change = current['Sitzungen'] - previous['Sitzungen']
         sessions_pct = ((current['Sitzungen'] / previous['Sitzungen'] - 1) * 100) if previous['Sitzungen'] > 0 else 0
         if sessions_change > 0:
-            summary_parts.append(f"**✅ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **+{format_number_de(sessions_change, 0)}** ({sessions_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **+{format_number_de(sessions_change, 0)}** ({format_percentage_de(sessions_pct, 1)})")
         elif sessions_change < 0:
-            summary_parts.append(f"**❌ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **{format_number_de(sessions_change, 0)}** ({sessions_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Sitzungen:** {format_number_de(previous['Sitzungen'], 0)} → **{format_number_de(current['Sitzungen'], 0)}** | **{format_number_de(sessions_change, 0)}** ({format_percentage_de(sessions_pct, 1)})")
         else:
             summary_parts.append(f"**➡️ Sitzungen:** **{format_number_de(current['Sitzungen'], 0)}** (unverändert)")
     
@@ -1345,9 +1379,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         aov_change = current['AOV (€)'] - previous['AOV (€)']
         aov_pct = ((current['AOV (€)'] / previous['AOV (€)'] - 1) * 100) if previous['AOV (€)'] > 0 else 0
         if aov_change > 0:
-            summary_parts.append(f"**✅ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **+{format_number_de(aov_change, 2)} €** ({aov_pct:+.1f}%)")
+            summary_parts.append(f"**✅ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **+{format_number_de(aov_change, 2)} €** ({format_percentage_de(aov_pct, 1)})")
         elif aov_change < 0:
-            summary_parts.append(f"**❌ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **{format_number_de(aov_change, 2)} €** ({aov_pct:+.1f}%)")
+            summary_parts.append(f"**❌ AOV:** {format_number_de(previous['AOV (€)'], 2)} € → **{format_number_de(current['AOV (€)'], 2)} €** | **{format_number_de(aov_change, 2)} €** ({format_percentage_de(aov_pct, 1)})")
         else:
             summary_parts.append(f"**➡️ AOV:** **{format_number_de(current['AOV (€)'], 2)} €** (unverändert)")
     
@@ -1356,9 +1390,9 @@ def generate_summary(current_data, previous_data, traffic_type='normal'):
         rps_change = current['Revenue per Session (€)'] - previous['Revenue per Session (€)']
         rps_pct = ((current['Revenue per Session (€)'] / previous['Revenue per Session (€)'] - 1) * 100) if previous['Revenue per Session (€)'] > 0 else 0
         if rps_change > 0:
-            summary_parts.append(f"**✅ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **+{format_number_de(rps_change, 2)} €** ({rps_pct:+.1f}%)")
+            summary_parts.append(f"**✅ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **+{format_number_de(rps_change, 2)} €** ({format_percentage_de(rps_pct, 1)})")
         elif rps_change < 0:
-            summary_parts.append(f"**❌ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **{format_number_de(rps_change, 2)} €** ({rps_pct:+.1f}%)")
+            summary_parts.append(f"**❌ Revenue per Session:** {format_number_de(previous['Revenue per Session (€)'], 2)} € → **{format_number_de(current['Revenue per Session (€)'], 2)} €** | **{format_number_de(rps_change, 2)} €** ({format_percentage_de(rps_pct, 1)})")
         else:
             summary_parts.append(f"**➡️ Revenue per Session:** **{format_number_de(current['Revenue per Session (€)'], 2)} €** (unverändert)")
     
