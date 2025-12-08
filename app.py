@@ -46,6 +46,10 @@ def format_number_de(value, decimals=0):
     # Konvertiere zu float
     num = float(value)
     
+    # Prüfe auf Infinity oder -Infinity
+    if np.isinf(num) or np.isnan(num):
+        return "0" if decimals == 0 else "0," + "0" * decimals
+    
     # Formatiere mit Komma als Dezimaltrennzeichen
     if decimals == 0:
         # Ganze Zahl: Tausenderpunkte
@@ -110,34 +114,70 @@ def parse_percentage(value):
         return 0.0
 
 def parse_numeric_value(value):
-    """Konvertiert numerische Strings mit deutschem Format (z.B. '9,778' oder '6,333') zu Float"""
-    if pd.isna(value) or value == '':
+    """Konvertiert numerische Strings zu Float
+    
+    Unterstützt verschiedene Formate:
+    - Deutsches Format: "1.234,56" (Punkt = Tausender, Komma = Dezimal)
+    - Englisches Format: "1,234.56" (Komma = Tausender, Punkt = Dezimal)
+    - Einfache Zahlen: "1234" oder "1234.56"
+    
+    WICHTIG: Amazon CSV verwendet Komma als Tausender-Trennung (z.B. "1,234" = 1234)
+    """
+    if pd.isna(value) or value == '' or value is None:
         return 0.0
+    
+    # Wenn bereits numerisch (Float), könnte es falsch interpretiert worden sein
+    # z.B. wenn pandas "1,234" als 1.234 gelesen hat statt 1234
+    # In diesem Fall können wir es nicht mehr korrigieren, aber wir geben es zurück
     if isinstance(value, (int, float)):
+        # Prüfe ob es eine sehr kleine Zahl ist, die möglicherweise falsch interpretiert wurde
+        # z.B. wenn "1,234" als 1.234 gelesen wurde, ist es < 1000
+        # Aber das ist schwer zu erkennen, also geben wir es einfach zurück
         return float(value)
     
     value_str = str(value).replace(' ', '').strip()
     
-    # Format: "9,778" (Komma als Tausendertrennzeichen) oder "1.234,56" (Punkt = Tausender, Komma = Dezimal)
+    # Leere Strings oder 'nan' behandeln
+    if value_str == '' or value_str.lower() == 'nan' or value_str.lower() == 'none':
+        return 0.0
+    
+    # Format: "1.234,56" (deutsches Format: Punkt = Tausender, Komma = Dezimal)
     if '.' in value_str and ',' in value_str:
-        # Format: "1.234,56" - Punkt ist Tausender, Komma ist Dezimal
-        value_str = value_str.replace('.', '').replace(',', '.')
-    elif ',' in value_str:
-        # Prüfe ob Komma Tausender oder Dezimal ist
-        parts = value_str.split(',')
-        if len(parts) == 2 and len(parts[1]) <= 2:
-            # Komma ist Dezimaltrennzeichen (z.B. "123,45")
-            value_str = value_str.replace(',', '.')
+        # Prüfe welches Format: Wenn Punkt VOR Komma kommt, ist es deutsches Format
+        dot_pos = value_str.find('.')
+        comma_pos = value_str.find(',')
+        if dot_pos < comma_pos:
+            # Deutsches Format: "1.234,56" -> "1234.56"
+            value_str = value_str.replace('.', '').replace(',', '.')
         else:
-            # Komma ist Tausendertrennzeichen (z.B. "9,778" oder "6,333")
+            # Englisches Format: "1,234.56" -> "1234.56"
             value_str = value_str.replace(',', '')
-    # Falls nur Punkt vorhanden und mehr als einer, dann Tausender
+    elif ',' in value_str:
+        # Nur Komma vorhanden: Prüfe ob Tausender oder Dezimal
+        parts = value_str.split(',')
+        if len(parts) == 2:
+            # Zwei Teile: Prüfe ob Dezimal oder Tausender
+            # Wenn der zweite Teil <= 2 Zeichen hat, ist es wahrscheinlich Dezimal (z.B. "123,45")
+            # Wenn der zweite Teil > 2 Zeichen hat, ist es wahrscheinlich Tausender (z.B. "1,234")
+            if len(parts[1]) <= 2:
+                # Komma ist Dezimaltrennzeichen (z.B. "123,45" - deutsches Format)
+                value_str = value_str.replace(',', '.')
+            else:
+                # Komma ist Tausendertrennzeichen (z.B. "1,234" oder "12,345" - englisches Format)
+                # WICHTIG: Amazon CSV verwendet Komma als Tausender-Trennung!
+                value_str = value_str.replace(',', '')
+        else:
+            # Mehr als 2 Teile: Komma ist definitiv Tausender-Trennung (z.B. "1,234,567")
+            value_str = value_str.replace(',', '')
+    # Falls nur Punkt vorhanden und mehr als einer, dann Tausender (deutsches Format)
     elif value_str.count('.') > 1:
+        # Mehrere Punkte = Tausenderpunkte (deutsches Format)
         value_str = value_str.replace('.', '')
     
     try:
-        return float(value_str)
-    except:
+        result = float(value_str)
+        return result
+    except (ValueError, TypeError):
         return 0.0
 
 def parse_date_column(date_str):
@@ -156,7 +196,18 @@ def parse_date_column(date_str):
 def load_and_process_csv(uploaded_file, file_name):
     """Lädt und verarbeitet eine CSV-Datei (ASIN-Level oder Account-Level)"""
     try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8')
+        # WICHTIG: Lese CSV mit expliziten Einstellungen, um sicherzustellen, dass Werte nicht als NaN interpretiert werden
+        # na_values=[] verhindert, dass irgendwelche Werte als NaN interpretiert werden
+        # keep_default_na=False verhindert, dass Standard-NaN-Werte (wie '', 'NA', 'N/A') als NaN interpretiert werden
+        # dtype=str liest alle Werte als Strings, damit wir sie manuell parsen können
+        df = pd.read_csv(
+            uploaded_file, 
+            encoding='utf-8', 
+            thousands=None, 
+            keep_default_na=False,
+            na_values=[],  # Keine Werte als NaN interpretieren
+            dtype=str  # Alle als String lesen
+        )
         
         # Entferne doppelte Spaltennamen (behalte die erste)
         if df.columns.duplicated().any():
@@ -215,6 +266,9 @@ def load_and_process_csv(uploaded_file, file_name):
         
         for col in numeric_columns:
             if col in df.columns:
+                # WICHTIG: Ersetze leere Strings und 'nan' Strings durch '0' vor dem Parsen
+                df[col] = df[col].replace('', '0').replace('nan', '0').replace('NaN', '0').replace('None', '0')
+                
                 # Euro-Werte
                 if 'Umsatz' in col or 'Bestellsumme' in col or 'Verkaufspreis' in col:
                     df[col] = df[col].apply(parse_euro_value)
@@ -223,8 +277,41 @@ def load_and_process_csv(uploaded_file, file_name):
                     df[col] = df[col].apply(parse_percentage)
                 # Normale numerische Werte (können auch mit Komma als Tausendertrennzeichen sein)
                 else:
-                    # Konvertiere zu String, dann parse mit deutschem Format
+                    # WICHTIG: Wenn bereits String (durch dtype=str), dann direkt parsen
+                    # parse_numeric_value behandelt Kommas als Tausender korrekt (z.B. "1,234" → 1234)
                     df[col] = df[col].apply(parse_numeric_value)
+                
+                # WICHTIG: Stelle sicher, dass die Spalte wirklich numerisch ist (nicht Object/String)
+                # ABER: parse_numeric_value gibt bereits Float-Werte zurück, die sollten direkt konvertierbar sein
+                # Prüfe ob die Spalte bereits numerisch ist
+                if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    # Bereits numerisch, nichts zu tun
+                    pass
+                else:
+                    # Spalte ist noch object (weil dtype=str beim CSV-Import)
+                    # parse_numeric_value hat bereits Float-Werte zurückgegeben, also sollten wir astype(float) verwenden
+                    # Das ist sicherer als pd.to_numeric, da die Werte bereits geparst wurden
+                    try:
+                        # Versuche direkte Konvertierung zu float (sollte funktionieren, da parse_numeric_value Float zurückgibt)
+                        df[col] = df[col].astype(float)
+                    except (ValueError, TypeError) as e:
+                        # Falls astype fehlschlägt, verwende pd.to_numeric als Fallback
+                        # ABER: Das sollte eigentlich nicht passieren, da parse_numeric_value immer Float zurückgibt
+                        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
+        # Entferne doppelte untergeordnete ASINs (behalte die erste)
+        # WICHTIG: Nur untergeordnete ASINs, nicht übergeordnete
+        if '(Untergeordnete) ASIN' in df.columns:
+            # Entferne Duplikate basierend auf untergeordneter ASIN und Zeitraum
+            # So bleiben ASINs mit unterschiedlichen Zeiträumen erhalten
+            subset_cols = ['(Untergeordnete) ASIN', 'Zeitraum']
+            # Prüfe ob alle Spalten vorhanden sind
+            if all(col in df.columns for col in subset_cols):
+                initial_count = len(df)
+                df = df.drop_duplicates(subset=subset_cols, keep='first')
+                removed_count = initial_count - len(df)
+                if removed_count > 0:
+                    st.info(f"ℹ️ {removed_count} doppelte Einträge für untergeordnete ASINs wurden entfernt.")
         
         return df
     except Exception as e:
@@ -599,6 +686,27 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
                 elif 'Bestellte Einheiten - B2B' in df.columns:
                     units_col = 'Bestellte Einheiten - B2B'
         
+        # WICHTIG: Stelle sicher, dass alle Spalten VOR der Aggregation numerisch sind
+        # Dies verhindert, dass Werte als Strings verkettet werden statt summiert
+        numeric_cols_before_agg = [units_col, revenue_col, views_col, sessions_col, orders_col, mobile_sessions_col, browser_sessions_col]
+        for col in numeric_cols_before_agg:
+            if col and col in df.columns:
+                # WICHTIG: Prüfe ob die Spalte bereits numerisch ist
+                if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    # Bereits numerisch, nichts zu tun
+                    pass
+                elif df[col].dtype == 'object':
+                    # Object-Typ: Die Werte könnten noch als String vorliegen (z.B. '78,643')
+                    # WICHTIG: Wende parse_numeric_value erneut an, um sicherzustellen, dass die Werte korrekt geparst werden
+                    # Dies ist notwendig, falls die Werte in aggregate_data noch als String ankommen
+                    df[col] = df[col].apply(parse_numeric_value)
+                    # Jetzt sollten die Werte Float sein, konvertiere zu float64
+                    df[col] = df[col].astype(float)
+                else:
+                    # Anderer Typ: Versuche pd.to_numeric
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
+        
         # Aggregations-Dictionary
         agg_dict = {
             units_col: 'sum',
@@ -615,7 +723,7 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             agg_dict[cr_col] = 'mean'  # Mittelwert für Conversion Rate
         
         aggregated = df.groupby('Zeitraum').agg(agg_dict).reset_index()
-    
+        
     if final_missing:
         st.warning(f"⚠️ Folgende Spalten fehlen wirklich in den Daten: {', '.join(final_missing)}")
     
@@ -628,6 +736,10 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
                 aggregated[col] = aggregated[col].apply(parse_euro_value)
             else:
                 aggregated[col] = aggregated[col].apply(parse_numeric_value)
+            
+            # WICHTIG: Stelle sicher, dass die Spalte wirklich numerisch ist (nicht Object/String)
+            # Dies verhindert, dass Werte als Strings verkettet werden statt summiert
+            aggregated[col] = pd.to_numeric(aggregated[col], errors='coerce').fillna(0)
     
     # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
     # WICHTIG: Suche die CR-Spalte in aggregated (nach Aggregation), aber verwende die ursprünglich gefundene cr_col wenn sie noch vorhanden ist
@@ -767,6 +879,21 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
         # Entferne doppelte Spalten (behalte die erste)
         aggregated = aggregated.loc[:, ~aggregated.columns.duplicated()]
     
+    # WICHTIG: Stelle sicher, dass alle numerischen Spalten wirklich numerisch sind (nicht Object/String)
+    # Dies verhindert, dass Werte als Strings verkettet werden statt summiert
+    numeric_cols_to_convert = ['Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Bestellte Einheiten', 
+                               'Mobile Sitzungen', 'Browser Sitzungen', 'Umsatz']
+    for col in numeric_cols_to_convert:
+        if col in aggregated.columns:
+            # Konvertiere explizit zu numerisch, falls die Spalte als Object/String vorliegt
+            aggregated[col] = pd.to_numeric(aggregated[col], errors='coerce').fillna(0)
+    
+    # Prüfe auch auf B2B-Spalten
+    if 'Bestellte Einheiten – B2B' in aggregated.columns:
+        aggregated['Bestellte Einheiten – B2B'] = pd.to_numeric(aggregated['Bestellte Einheiten – B2B'], errors='coerce').fillna(0)
+    elif 'Bestellte Einheiten - B2B' in aggregated.columns:
+        aggregated['Bestellte Einheiten - B2B'] = pd.to_numeric(aggregated['Bestellte Einheiten - B2B'], errors='coerce').fillna(0)
+    
     return aggregated
 
 def aggregate_by_period(df, period='week', traffic_type='normal'):
@@ -830,6 +957,16 @@ def aggregate_by_period(df, period='week', traffic_type='normal'):
     agg_dict['Zeitraum_DT'] = 'first'  # Behalte erstes Datum für Sortierung
     
     aggregated = df.groupby('Zeitraum_Agg', as_index=False).agg(agg_dict)
+    
+    # WICHTIG: Stelle sicher, dass alle numerischen Spalten wirklich numerisch sind (nicht Object/String)
+    # Dies verhindert, dass Werte als Strings verkettet werden statt summiert
+    for col in aggregated.columns:
+        if col not in ['Zeitraum_Agg', 'Zeitraum_DT', 'Zeitraum_Nr', 'Jahr']:
+            # Prüfe ob Spalte numerisch sein sollte (nicht Conversion Rate, die ist bereits als mean aggregiert)
+            if col not in exclude_from_sum or col in [cr_col_normal, cr_col_b2b] if (cr_col_normal or cr_col_b2b) else False:
+                # Konvertiere explizit zu numerisch, falls die Spalte als Object/String vorliegt
+                if aggregated[col].dtype == 'object':
+                    aggregated[col] = pd.to_numeric(aggregated[col], errors='coerce').fillna(0)
     
     # Sortiere nach Datum
     aggregated = aggregated.sort_values('Zeitraum_DT')
@@ -895,6 +1032,7 @@ def aggregate_by_period(df, period='week', traffic_type='normal'):
 
 def get_top_flop_asins(df, traffic_type='normal'):
     """Identifiziert Top- und Flop-ASINs basierend auf Umsatz"""
+    
     if traffic_type == 'B2B':
         # Verwende Hilfsfunktion die auch Non-Breaking Spaces berücksichtigt
         units_col = find_b2b_units_column(df)
@@ -909,9 +1047,29 @@ def get_top_flop_asins(df, traffic_type='normal'):
         sessions_col = find_column(df, ['Sitzungen – Summe', 'Sitzungen - Summe'])
         orders_col = find_column(df, ['Zahl der Bestellposten'])
     
-    # Fallback falls Spalten nicht gefunden
-    if not all([units_col, revenue_col, views_col, sessions_col, orders_col]):
+    # WICHTIG: Prüfe ob mindestens die wichtigsten Spalten gefunden wurden
+    # views_col und sessions_col sind optional (können fehlen)
+    if not all([units_col, revenue_col, orders_col]):
         return None, None
+    
+    # Wenn views_col oder sessions_col nicht gefunden wurden, versuche Fallback
+    if not views_col:
+        # Versuche Sitzungen als Fallback für Seitenaufrufe
+        if sessions_col:
+            views_col = sessions_col
+        else:
+            # Suche nach alternativen Spalten
+            for col in df.columns:
+                if 'seitenaufrufe' in col.lower() or 'views' in col.lower():
+                    views_col = col
+                    break
+    
+    if not sessions_col:
+        # Suche nach alternativen Spalten
+        for col in df.columns:
+            if 'sitzungen' in col.lower() and 'summe' in col.lower():
+                sessions_col = col
+                break
     
     # Verwende untergeordnete ASINs
     asin_column = '(Untergeordnete) ASIN'
@@ -922,13 +1080,31 @@ def get_top_flop_asins(df, traffic_type='normal'):
         return None, None
     
     # Aggregiere nach ASIN
-    asin_data = df.groupby(asin_column).agg({
-        units_col: 'sum',
-        revenue_col: 'sum',
-        views_col: 'sum',
-        sessions_col: 'sum',
-        orders_col: 'sum'
-    }).reset_index()
+    # WICHTIG: Erstelle agg_dict nur mit Spalten, die wirklich existieren
+    agg_dict = {}
+    if units_col and units_col in df.columns:
+        agg_dict[units_col] = 'sum'
+    if revenue_col and revenue_col in df.columns:
+        agg_dict[revenue_col] = 'sum'
+    if views_col and views_col in df.columns:
+        agg_dict[views_col] = 'sum'
+    if sessions_col and sessions_col in df.columns:
+        agg_dict[sessions_col] = 'sum'
+    if orders_col and orders_col in df.columns:
+        agg_dict[orders_col] = 'sum'
+    
+    # Prüfe ob mindestens die wichtigsten Spalten vorhanden sind
+    if not agg_dict:
+        return None, None
+    
+    asin_data = df.groupby(asin_column).agg(agg_dict).reset_index()
+    
+    # Stelle sicher, dass alle numerischen Spalten auch wirklich numerisch sind
+    # WICHTIG: Prüfe ob Spalten wirklich vorhanden sind
+    numeric_cols = [units_col, revenue_col, views_col, sessions_col, orders_col]
+    for col in numeric_cols:
+        if col and col in asin_data.columns:
+            asin_data[col] = pd.to_numeric(asin_data[col], errors='coerce').fillna(0)
     
     # Berechne KPIs
     # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
@@ -939,31 +1115,75 @@ def get_top_flop_asins(df, traffic_type='normal'):
         asin_cr = df.groupby(asin_column)[cr_col].mean().reset_index()
         asin_cr.columns = [asin_column, 'Conversion Rate (%)']
         asin_data = asin_data.merge(asin_cr, on=asin_column, how='left')
-        asin_data['Conversion Rate (%)'] = asin_data['Conversion Rate (%)'].fillna(0)
+        asin_data['Conversion Rate (%)'] = pd.to_numeric(asin_data['Conversion Rate (%)'], errors='coerce').fillna(0)
     else:
         # Fallback: Berechne aus Bestellposten / Sitzungen * 100
-        asin_data['Conversion Rate (%)'] = (
-            (asin_data[orders_col] / asin_data[sessions_col].replace(0, np.nan) * 100)
+        # WICHTIG: Prüfe ob Spalten vorhanden sind
+        if sessions_col and sessions_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
+            sessions_safe = asin_data[sessions_col].replace(0, np.nan)
+            asin_data['Conversion Rate (%)'] = (
+                (asin_data[orders_col].astype(float) / sessions_safe.astype(float) * 100)
+                .fillna(0)
+                .replace([np.inf, -np.inf], 0)
+            )
+        else:
+            asin_data['Conversion Rate (%)'] = 0
+    
+    # AOV: Revenue / Orders
+    if revenue_col and revenue_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
+        orders_safe = asin_data[orders_col].replace(0, np.nan)
+        asin_data['AOV (€)'] = (
+            (asin_data[revenue_col].astype(float) / orders_safe.astype(float))
             .fillna(0)
             .replace([np.inf, -np.inf], 0)
         )
-    asin_data['AOV (€)'] = (
-        (asin_data[revenue_col] / asin_data[orders_col].replace(0, np.nan))
-        .fillna(0)
-        .replace([np.inf, -np.inf], 0)
-    )
-    asin_data['Revenue per Session (€)'] = (
-        (asin_data[revenue_col] / asin_data[sessions_col].replace(0, np.nan))
-        .fillna(0)
-        .replace([np.inf, -np.inf], 0)
-    )
+    else:
+        asin_data['AOV (€)'] = 0
+    
+    # Revenue per Session: Revenue / Sessions
+    if revenue_col and revenue_col in asin_data.columns and sessions_col and sessions_col in asin_data.columns:
+        sessions_safe = asin_data[sessions_col].replace(0, np.nan)
+        asin_data['Revenue per Session (€)'] = (
+            (asin_data[revenue_col].astype(float) / sessions_safe.astype(float))
+            .fillna(0)
+            .replace([np.inf, -np.inf], 0)
+        )
+    else:
+        asin_data['Revenue per Session (€)'] = 0
     
     # Sortiere nach Umsatz (absteigend)
     asin_data = asin_data.sort_values(revenue_col, ascending=False)
     
     # Top ASIN (höchster Umsatz)
-    top_asins = asin_data.head(1).copy()
-    top_asins.columns = ['ASIN', 'Einheiten', 'Umsatz', 'Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Conversion Rate (%)', 'AOV (€)', 'Revenue per Session (€)']
+    if len(asin_data) > 0:
+        top_asins = asin_data.head(1).copy()
+        
+        # Benenne Spalten explizit um, um sicherzustellen, dass die Reihenfolge stimmt
+        # WICHTIG: Prüfe ob Spalten existieren, bevor sie umbenannt werden
+        rename_dict = {
+            asin_column: 'ASIN',
+            units_col: 'Einheiten',
+            revenue_col: 'Umsatz',
+            orders_col: 'Bestellungen'
+        }
+        # Füge views_col und sessions_col nur hinzu, wenn sie existieren
+        if views_col and views_col in top_asins.columns:
+            rename_dict[views_col] = 'Seitenaufrufe'
+        if sessions_col and sessions_col in top_asins.columns:
+            rename_dict[sessions_col] = 'Sitzungen'
+        
+        top_asins = top_asins.rename(columns=rename_dict)
+        
+        # Stelle sicher, dass alle benötigten Spalten vorhanden sind
+        required_cols = ['ASIN', 'Einheiten', 'Umsatz', 'Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Conversion Rate (%)', 'AOV (€)', 'Revenue per Session (€)']
+        for col in required_cols:
+            if col not in top_asins.columns:
+                top_asins[col] = 0
+        
+        # Wähle nur die benötigten Spalten in der richtigen Reihenfolge
+        top_asins = top_asins[required_cols]
+    else:
+        top_asins = None
     
     # Flop ASIN (niedrigster Umsatz, aber > 0)
     # Filtere ASINs mit Umsatz > 0 und sortiere aufsteigend
@@ -972,7 +1192,29 @@ def get_top_flop_asins(df, traffic_type='normal'):
         # Sortiere aufsteigend für Flop
         asin_data_with_revenue = asin_data_with_revenue.sort_values(revenue_col, ascending=True)
         flop_asins = asin_data_with_revenue.head(1).copy()
-        flop_asins.columns = ['ASIN', 'Einheiten', 'Umsatz', 'Seitenaufrufe', 'Sitzungen', 'Bestellungen', 'Conversion Rate (%)', 'AOV (€)', 'Revenue per Session (€)']
+        
+        # Benenne Spalten explizit um
+        # WICHTIG: Prüfe ob Spalten existieren, bevor sie umbenannt werden
+        rename_dict_flop = {
+            asin_column: 'ASIN',
+            units_col: 'Einheiten',
+            revenue_col: 'Umsatz',
+            orders_col: 'Bestellungen'
+        }
+        # Füge views_col und sessions_col nur hinzu, wenn sie existieren
+        if views_col and views_col in flop_asins.columns:
+            rename_dict_flop[views_col] = 'Seitenaufrufe'
+        if sessions_col and sessions_col in flop_asins.columns:
+            rename_dict_flop[sessions_col] = 'Sitzungen'
+        
+        flop_asins = flop_asins.rename(columns=rename_dict_flop)
+        
+        # Stelle sicher, dass alle benötigten Spalten vorhanden sind
+        for col in required_cols:
+            if col not in flop_asins.columns:
+                flop_asins[col] = 0
+        # Wähle nur die benötigten Spalten in der richtigen Reihenfolge
+        flop_asins = flop_asins[required_cols]
     elif len(asin_data_with_revenue) == 1:
         # Nur ein ASIN mit Umsatz - das ist dann sowohl Top als auch Flop
         flop_asins = None
@@ -1400,13 +1642,23 @@ if uploaded_files:
                 st.metric("Gesamtumsatz", f"{format_number_de(total_revenue, 2)} €")
             
             with col3:
-                if views_col_stat and views_col_stat in filtered_df.columns:
-                    views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
+                # Berechne Seitenaufrufe aus aggregierten Daten (konsistent mit Grafik)
+                # Verwende normal_data_combined, da dies die aggregierten Daten sind, die auch in der Grafik verwendet werden
+                if 'Seitenaufrufe' in normal_data_combined.columns:
+                    # Summiere über alle Zeiträume in den aggregierten Daten
+                    total_views = pd.to_numeric(normal_data_combined['Seitenaufrufe'], errors='coerce').fillna(0).sum()
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
+                elif 'Sitzungen' in normal_data_combined.columns:
+                    # Fallback: Verwende Sitzungen statt Seitenaufrufe
+                    total_views = pd.to_numeric(normal_data_combined['Sitzungen'], errors='coerce').fillna(0).sum()
+                    st.metric("Gesamt Sitzungen", format_number_de(total_views, 0))
+                elif views_col_stat and views_col_stat in filtered_df.columns:
+                    # Fallback: Verwende rohe Daten aus filtered_df (falls aggregierte Daten nicht verfügbar)
+                    views_numeric = pd.to_numeric(filtered_df[views_col_stat], errors='coerce').fillna(0)
                     total_views = views_numeric.sum()
                     st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
                 else:
-                    total_views = normal_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in normal_data_combined.columns else (normal_data_combined['Sitzungen'].sum() if 'Sitzungen' in normal_data_combined.columns else 0)
-                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
+                    st.metric("Gesamt Seitenaufrufe", "N/A")
             
             with col4:
                 asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
@@ -1500,12 +1752,20 @@ if uploaded_files:
             
             with col3:
                 if views_col_stat_b2b and views_col_stat_b2b in filtered_df.columns:
-                    views_numeric = filtered_df[views_col_stat_b2b].apply(parse_numeric_value)
+                    # Konvertiere zu numerisch und summiere über alle Zeilen (alle ASINs und Zeiträume)
+                    views_numeric = pd.to_numeric(filtered_df[views_col_stat_b2b], errors='coerce').fillna(0)
                     total_views = views_numeric.sum()
                     st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
-                else:
-                    total_views = b2b_data_combined['Seitenaufrufe'].sum() if 'Seitenaufrufe' in b2b_data_combined.columns else (b2b_data_combined['Sitzungen'].sum() if 'Sitzungen' in b2b_data_combined.columns else 0)
+                elif 'Seitenaufrufe' in b2b_data_combined.columns:
+                    # Fallback: Verwende aggregierte Daten (bereits nach Zeitraum aggregiert)
+                    total_views = pd.to_numeric(b2b_data_combined['Seitenaufrufe'], errors='coerce').fillna(0).sum()
                     st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
+                elif 'Sitzungen' in b2b_data_combined.columns:
+                    # Fallback: Verwende Sitzungen statt Seitenaufrufe
+                    total_views = pd.to_numeric(b2b_data_combined['Sitzungen'], errors='coerce').fillna(0).sum()
+                    st.metric("Gesamt Sitzungen", format_number_de(total_views, 0))
+                else:
+                    st.metric("Gesamt Seitenaufrufe", "N/A")
             
             with col4:
                 asin_col_metric = '(Untergeordnete) ASIN' if '(Untergeordnete) ASIN' in filtered_df.columns else '(Übergeordnete) ASIN'
@@ -1606,20 +1866,30 @@ if uploaded_files:
             
             with col3:
                 # Seitenaufrufe oder Sitzungen
-                if views_col_stat and views_col_stat in filtered_df.columns:
-                    # Konvertiere zu numerisch und berechne Summe
-                    views_numeric = filtered_df[views_col_stat].apply(parse_numeric_value)
+                # WICHTIG: Verwende aggregierte Daten (konsistent mit Grafik), nicht filtered_df
+                
+                if 'Seitenaufrufe' in aggregated_data.columns:
+                    # Verwende aggregierte Daten (bereits nach Zeitraum aggregiert)
+                    total_views = pd.to_numeric(aggregated_data['Seitenaufrufe'], errors='coerce').fillna(0).sum()
+                    st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
+                elif 'Sitzungen' in aggregated_data.columns:
+                    # Fallback: Verwende Sitzungen statt Seitenaufrufe
+                    total_sessions = pd.to_numeric(aggregated_data['Sitzungen'], errors='coerce').fillna(0).sum()
+                    st.metric("Gesamt Sitzungen", format_number_de(total_sessions, 0))
+                elif views_col_stat and views_col_stat in filtered_df.columns:
+                    # Fallback: Verwende rohe Daten aus filtered_df (falls aggregierte Daten nicht verfügbar)
+                    views_numeric = pd.to_numeric(filtered_df[views_col_stat], errors='coerce').fillna(0)
                     total_views = views_numeric.sum()
                     if total_views > 0:
                         st.metric("Gesamt Seitenaufrufe", format_number_de(total_views, 0))
                     elif 'Sitzungen – Summe' in filtered_df.columns:
-                        sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
+                        sessions_numeric = pd.to_numeric(filtered_df['Sitzungen – Summe'], errors='coerce').fillna(0)
                         total_sessions = sessions_numeric.sum()
                         st.metric("Gesamt Sitzungen", format_number_de(total_sessions, 0))
                     else:
                         st.metric("Gesamt Seitenaufrufe", "N/A")
                 elif 'Sitzungen – Summe' in filtered_df.columns:
-                    sessions_numeric = filtered_df['Sitzungen – Summe'].apply(parse_numeric_value)
+                    sessions_numeric = pd.to_numeric(filtered_df['Sitzungen – Summe'], errors='coerce').fillna(0)
                     total_sessions = sessions_numeric.sum()
                     st.metric("Gesamt Sitzungen", format_number_de(total_sessions, 0))
                 else:
@@ -1641,6 +1911,294 @@ if uploaded_files:
                 st.metric("Ø AOV", f"{format_number_de(avg_aov, 2)} €")
         
         st.divider()
+        
+        # Jahresvergleich für Monat und YTD (nur bei Account-Level, kombinierte Ansicht)
+        # NICHT für Wochenansicht
+        if is_account_level and 'Umsatz' in aggregated_data.columns and period_key != 'week':
+            st.subheader("📈 Jahresvergleich")
+            
+            # Bereite Daten für Jahresvergleich vor - kombiniere Normal und B2B
+            # WICHTIG: Verwende die aggregierten Daten direkt, da sie bereits alle Perioden enthalten
+            year_revenue_combined = aggregated_data.groupby('Zeitraum')['Umsatz'].sum().reset_index()
+            
+            if period_key == 'ytd':
+                # YTD: Zeige Jahreswerte
+                year_revenue_combined['Jahr'] = year_revenue_combined['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
+                year_revenue_combined = year_revenue_combined.groupby('Jahr')['Umsatz'].sum().reset_index()
+                year_revenue_combined = year_revenue_combined.sort_values('Jahr')
+                
+                # Berechne prozentuale Veränderung (gegenüber Vorjahr)
+                year_revenue_combined['Wachstum (%)'] = 0.0
+                for i in range(1, len(year_revenue_combined)):
+                    prev_revenue = year_revenue_combined.iloc[i-1]['Umsatz']
+                    curr_revenue = year_revenue_combined.iloc[i]['Umsatz']
+                    if prev_revenue > 0:
+                        growth_pct = ((curr_revenue - prev_revenue) / prev_revenue) * 100
+                        year_revenue_combined.iloc[i, year_revenue_combined.columns.get_loc('Wachstum (%)')] = growth_pct
+                
+                # Erstelle kombinierte Grafik mit Balken (Umsatz) und Linie (Wachstum %)
+                from plotly.subplots import make_subplots
+                import plotly.graph_objects as go
+                
+                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # Balken für Umsatz (linke Y-Achse)
+                fig_year_comparison.add_trace(
+                    go.Bar(
+                        x=year_revenue_combined['Jahr'].astype(str),
+                        y=year_revenue_combined['Umsatz'],
+                        name='Umsatz',
+                        marker_color='#1f77b4',
+                        text=[format_number_de(val, 0) for val in year_revenue_combined['Umsatz']],
+                        textposition='outside'
+                    ),
+                    secondary_y=False
+                )
+                
+                # Linie für prozentuale Veränderung (rechte Y-Achse)
+                fig_year_comparison.add_trace(
+                    go.Scatter(
+                        x=year_revenue_combined['Jahr'].astype(str),
+                        y=year_revenue_combined['Wachstum (%)'],
+                        name='Wachstum',
+                        mode='lines+markers',
+                        line=dict(color='#ff7f0e', width=3),
+                        marker=dict(size=10, color='#ff7f0e'),
+                        text=[f"{val:+.1f}%" if val != 0 else "0%" for val in year_revenue_combined['Wachstum (%)']],
+                        textposition='top center'
+                    ),
+                    secondary_y=True
+                )
+                
+                # Y-Achsen konfigurieren
+                fig_year_comparison.update_yaxes(
+                    title_text="Umsatz (€)",
+                    secondary_y=False,
+                    showgrid=True
+                )
+                fig_year_comparison.update_yaxes(
+                    title_text="Wachstum (%)",
+                    secondary_y=True,
+                    showgrid=False
+                )
+                
+                # Layout anpassen
+                fig_year_comparison.update_layout(
+                    title='Jahresvergleich: Umsatz und Wachstum (YTD)',
+                    height=500,
+                    xaxis_title='Jahr',
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_ytd_combined")
+            else:
+                # Monat oder Woche: Zeige Perioden auf X-Achse, Jahre als verschiedene Serien
+                # Extrahiere Jahr und Periode
+                year_revenue_combined['Jahr'] = year_revenue_combined['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
+                
+                # Deutsche Monatsnamen
+                month_names_de = {
+                    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April', 5: 'Mai', 6: 'Juni',
+                    7: 'Juli', 8: 'August', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
+                }
+                
+                if period_key == 'month':
+                    # Extrahiere Monat aus Zeitraum (z.B. "2024-01" -> "Januar")
+                    year_revenue_combined['Monat_Nr'] = pd.to_datetime(year_revenue_combined['Zeitraum'], errors='coerce').dt.month
+                    year_revenue_combined['Periode'] = year_revenue_combined['Monat_Nr'].map(month_names_de)
+                    # Sortiere nach Jahr und Monat
+                    year_revenue_combined = year_revenue_combined.sort_values(['Jahr', 'Monat_Nr'])
+                    x_axis_col = 'Periode'
+                    x_axis_title = 'Monat'
+                else:  # week
+                    # Extrahiere Woche aus Zeitraum und formatiere als "KW01", "KW02" etc.
+                    # Format von to_period('W') ist "2024-W01" (mit Bindestrich)
+                    # Versuche verschiedene Formate
+                    week_numbers = year_revenue_combined['Zeitraum'].str.extract(r'W(\d+)', expand=False)
+                    # Falls das nicht funktioniert, versuche direkt aus dem Zeitraum zu extrahieren
+                    if week_numbers.isna().all():
+                        # Versuche Format wie "2024-W01" oder "2024W01" (ohne Leerzeichen)
+                        week_numbers = year_revenue_combined['Zeitraum'].str.extract(r'[Ww](\d+)', expand=False)
+                    # Falls immer noch keine Werte, versuche aus dem Datum zu berechnen
+                    if week_numbers.isna().any():
+                        # Konvertiere nur die Zeilen mit NaN-Perioden zu datetime
+                        mask_na = week_numbers.isna()
+                        zeitraum_na = year_revenue_combined.loc[mask_na, 'Zeitraum']
+                        # Konvertiere zu datetime
+                        dt_col = pd.to_datetime(zeitraum_na, errors='coerce')
+                        # Nur für gültige datetime-Werte die Woche berechnen
+                        for idx in dt_col.index:
+                            if pd.notna(dt_col.loc[idx]):
+                                try:
+                                    week_num = dt_col.loc[idx].isocalendar()[1]  # [1] ist die Woche
+                                    week_numbers.loc[idx] = str(week_num).zfill(2)
+                                except:
+                                    pass
+                    
+                    # Formatiere Wochen als "KW01", "KW02" etc.
+                    year_revenue_combined['Periode'] = 'KW' + week_numbers.astype(str).str.zfill(2)
+                    
+                    # WICHTIG: Entferne nur Zeilen, die wirklich keine Periode haben (nicht wenn Jahr fehlt)
+                    # Behalte alle Zeilen mit gültiger Periode, auch wenn Jahr fehlt
+                    year_revenue_combined = year_revenue_combined.dropna(subset=['Periode'])
+                    # Falls Jahr fehlt, versuche es aus Zeitraum zu extrahieren
+                    if year_revenue_combined['Jahr'].isna().any():
+                        year_revenue_combined.loc[year_revenue_combined['Jahr'].isna(), 'Jahr'] = year_revenue_combined.loc[year_revenue_combined['Jahr'].isna(), 'Zeitraum'].str.extract(r'(\d{4})', expand=False)
+                    # Entferne nur Zeilen ohne Jahr
+                    year_revenue_combined = year_revenue_combined.dropna(subset=['Jahr'])
+                    # Sortiere nach Jahr und Woche (extrahiere Woche-Nummer für Sortierung)
+                    year_revenue_combined['Woche_Nr'] = pd.to_numeric(year_revenue_combined['Periode'].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
+                    year_revenue_combined = year_revenue_combined.sort_values(['Jahr', 'Woche_Nr'])
+                    x_axis_col = 'Periode'
+                    x_axis_title = 'Woche'
+                    
+                    # Erstelle eine vollständige Liste aller Wochen für alle Jahre
+                    all_years = sorted(year_revenue_combined['Jahr'].unique())
+                    all_weeks = sorted(year_revenue_combined['Periode'].unique())
+                    
+                    # Stelle sicher, dass alle Wochen für alle Jahre in der Pivot-Tabelle vorhanden sind
+                    # Erstelle eine vollständige Kombination aus allen Jahren und Wochen
+                    from itertools import product
+                    complete_combinations = pd.DataFrame(list(product(all_weeks, all_years)), columns=['Periode', 'Jahr'])
+                    # Merge mit den tatsächlichen Daten
+                    year_revenue_combined = complete_combinations.merge(
+                        year_revenue_combined,
+                        on=['Periode', 'Jahr'],
+                        how='left'
+                    )
+                    # Fülle fehlende Umsatz-Werte mit 0
+                    year_revenue_combined['Umsatz'] = year_revenue_combined['Umsatz'].fillna(0)
+                
+                # Erstelle Pivot-Tabelle: Jahre als Spalten, Perioden als Zeilen
+                # WICHTIG: Verwende fill_value=0, damit alle Perioden angezeigt werden, auch wenn sie nur in einem Jahr vorhanden sind
+                pivot_data = year_revenue_combined.pivot_table(
+                    index=x_axis_col,
+                    columns='Jahr',
+                    values='Umsatz',
+                    aggfunc='sum',
+                    fill_value=0
+                ).reset_index()
+                
+                # Sortiere Perioden
+                if period_key == 'month':
+                    # Sortiere nach Monatsnummer
+                    month_order = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 
+                                  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
+                    pivot_data['Monat_Order'] = pivot_data[x_axis_col].map({m: i for i, m in enumerate(month_order)})
+                    # Setze NaN-Werte auf hohe Zahl, damit sie am Ende sortiert werden
+                    pivot_data['Monat_Order'] = pivot_data['Monat_Order'].fillna(999)
+                    pivot_data = pivot_data.sort_values('Monat_Order').drop(columns='Monat_Order')
+                else:
+                    # Sortiere nach Wochennummer (extrahiere aus "KW01", "KW02" etc.)
+                    pivot_data['Woche_Order'] = pd.to_numeric(pivot_data[x_axis_col].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
+                    pivot_data = pivot_data.sort_values('Woche_Order').drop(columns='Woche_Order')
+                
+                # Berechne prozentuale Veränderung für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
+                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # Farben für verschiedene Jahre
+                year_colors = {
+                    2023: '#d3d3d3',  # Hellgrau
+                    2024: '#1f77b4',  # Blau
+                    2025: '#ffd700',  # Gelb
+                    2026: '#2ca02c',  # Grün
+                    2027: '#d62728'   # Rot
+                }
+                
+                # Füge Balken für jedes Jahr hinzu
+                for year_col in pivot_data.columns:
+                    if year_col != x_axis_col:
+                        year = int(year_col)
+                        color = year_colors.get(year, '#1f77b4')
+                        fig_year_comparison.add_trace(
+                            go.Bar(
+                                x=pivot_data[x_axis_col],
+                                y=pivot_data[year_col],
+                                name=str(year),
+                                marker_color=color,
+                                text=[format_number_de(val, 0) if val > 0 else '' for val in pivot_data[year_col]],
+                                textposition='outside'
+                            ),
+                            secondary_y=False
+                        )
+                
+                # Berechne Wachstum für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
+                # Extrahiere Jahre aus Spaltennamen (können String oder Integer sein)
+                year_cols = [col for col in pivot_data.columns if col != x_axis_col]
+                years_sorted = sorted([int(col) if isinstance(col, (int, str)) and str(col).isdigit() else 0 for col in year_cols])
+                years_sorted = [y for y in years_sorted if y > 0]  # Entferne 0-Werte
+                
+                if len(years_sorted) > 1:
+                    # Berechne Wachstum für das neueste Jahr gegenüber dem Vorjahr
+                    latest_year = years_sorted[-1]
+                    prev_year = years_sorted[-2]
+                    
+                    # Prüfe ob die Spalten existieren (als String oder Integer)
+                    prev_col = None
+                    latest_col = None
+                    for col in pivot_data.columns:
+                        if col != x_axis_col:
+                            try:
+                                col_int = int(col) if isinstance(col, str) and col.isdigit() else (int(col) if isinstance(col, int) else None)
+                                if col_int == prev_year:
+                                    prev_col = col
+                                if col_int == latest_year:
+                                    latest_col = col
+                            except:
+                                pass
+                    
+                    if prev_col and latest_col:
+                        growth_data = []
+                        for idx, row in pivot_data.iterrows():
+                            prev_val = float(row[prev_col])
+                            curr_val = float(row[latest_col])
+                            if prev_val > 0:
+                                growth_pct = ((curr_val - prev_val) / prev_val) * 100
+                            else:
+                                growth_pct = 0.0 if curr_val == 0 else 100.0
+                            growth_data.append(growth_pct)
+                        
+                        # Linie für prozentuale Veränderung (rechte Y-Achse)
+                        # WICHTIG: Verwende die gleichen X-Werte wie die Balken
+                        fig_year_comparison.add_trace(
+                            go.Scatter(
+                                x=pivot_data[x_axis_col],
+                                y=growth_data,
+                                name='Wachstum',
+                                mode='lines+markers',
+                                line=dict(color='#ff7f0e', width=3),
+                                marker=dict(size=10, color='#ff7f0e'),
+                                text=[f"{val:+.1f}%" if val != 0 else "0%" for val in growth_data],
+                                textposition='top center'
+                            ),
+                            secondary_y=True
+                        )
+                
+                # Y-Achsen konfigurieren
+                fig_year_comparison.update_yaxes(
+                    title_text="Umsatz (€)",
+                    secondary_y=False,
+                    showgrid=True
+                )
+                fig_year_comparison.update_yaxes(
+                    title_text="Wachstum (%)",
+                    secondary_y=True,
+                    showgrid=False
+                )
+                
+                # Layout anpassen
+                period_title = {'week': 'Woche', 'month': 'Monat'}.get(period_key, '')
+                fig_year_comparison.update_layout(
+                    title=f'Jahresvergleich: Umsatz und Wachstum ({period_title})',
+                    height=500,
+                    xaxis_title=x_axis_title,
+                    hovermode='x unified',
+                    barmode='group',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_{period_key}_combined")
         
         # KPI-Übersicht (Kombinierte Visualisierung)
         st.subheader("📊 KPI-Übersicht")
@@ -1796,6 +2354,293 @@ if uploaded_files:
             fig_combined.update_layout(height=400, showlegend=False)
             fig_combined.update_xaxes(title_text='Zeitraum')
             st.plotly_chart(fig_combined, use_container_width=True)
+        
+        # Jahresvergleich für Monat und YTD (nur bei Account-Level)
+        # NICHT für Wochenansicht
+        if is_account_level and 'Umsatz' in aggregated_data.columns and period_key != 'week':
+            st.subheader("📈 Jahresvergleich")
+            
+            # Bereite Daten für Jahresvergleich vor
+            year_revenue_data = aggregated_data.copy()
+            
+            if period_key == 'ytd':
+                # YTD: Zeige Jahreswerte
+                year_revenue_data['Jahr'] = year_revenue_data['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
+                year_revenue_data = year_revenue_data.groupby('Jahr')['Umsatz'].sum().reset_index()
+                year_revenue_data = year_revenue_data.sort_values('Jahr')
+                
+                # Berechne prozentuale Veränderung (gegenüber Vorjahr)
+                year_revenue_data['Wachstum (%)'] = 0.0
+                for i in range(1, len(year_revenue_data)):
+                    prev_revenue = year_revenue_data.iloc[i-1]['Umsatz']
+                    curr_revenue = year_revenue_data.iloc[i]['Umsatz']
+                    if prev_revenue > 0:
+                        growth_pct = ((curr_revenue - prev_revenue) / prev_revenue) * 100
+                        year_revenue_data.iloc[i, year_revenue_data.columns.get_loc('Wachstum (%)')] = growth_pct
+                
+                # Erstelle kombinierte Grafik mit Balken (Umsatz) und Linie (Wachstum %)
+                from plotly.subplots import make_subplots
+                import plotly.graph_objects as go
+                
+                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # Balken für Umsatz (linke Y-Achse)
+                fig_year_comparison.add_trace(
+                    go.Bar(
+                        x=year_revenue_data['Jahr'].astype(str),
+                        y=year_revenue_data['Umsatz'],
+                        name='Umsatz',
+                        marker_color='#1f77b4',
+                        text=[format_number_de(val, 0) for val in year_revenue_data['Umsatz']],
+                        textposition='outside'
+                    ),
+                    secondary_y=False
+                )
+                
+                # Linie für prozentuale Veränderung (rechte Y-Achse)
+                fig_year_comparison.add_trace(
+                    go.Scatter(
+                        x=year_revenue_data['Jahr'].astype(str),
+                        y=year_revenue_data['Wachstum (%)'],
+                        name='Wachstum',
+                        mode='lines+markers',
+                        line=dict(color='#ff7f0e', width=3),
+                        marker=dict(size=10, color='#ff7f0e'),
+                        text=[f"{val:+.1f}%" if val != 0 else "0%" for val in year_revenue_data['Wachstum (%)']],
+                        textposition='top center'
+                    ),
+                    secondary_y=True
+                )
+                
+                # Y-Achsen konfigurieren
+                fig_year_comparison.update_yaxes(
+                    title_text="Umsatz (€)",
+                    secondary_y=False
+                )
+                fig_year_comparison.update_yaxes(
+                    title_text="Wachstum (%)",
+                    secondary_y=True
+                )
+                
+                # Layout anpassen
+                fig_year_comparison.update_layout(
+                    title='Jahresvergleich: Umsatz und Wachstum (YTD)',
+                    height=500,
+                    xaxis_title='Jahr',
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_ytd_normal")
+            else:
+                # Monat oder Woche: Zeige Perioden auf X-Achse, Jahre als verschiedene Serien
+                year_revenue_data['Jahr'] = year_revenue_data['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
+                
+                # Deutsche Monatsnamen
+                month_names_de = {
+                    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April', 5: 'Mai', 6: 'Juni',
+                    7: 'Juli', 8: 'August', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
+                }
+                
+                if period_key == 'month':
+                    # Extrahiere Monat aus Zeitraum (z.B. "2024-01" -> "Januar")
+                    year_revenue_data['Monat_Nr'] = pd.to_datetime(year_revenue_data['Zeitraum'], errors='coerce').dt.month
+                    year_revenue_data['Periode'] = year_revenue_data['Monat_Nr'].map(month_names_de)
+                    # Sortiere nach Jahr und Monat
+                    year_revenue_data = year_revenue_data.sort_values(['Jahr', 'Monat_Nr'])
+                    x_axis_col = 'Periode'
+                    x_axis_title = 'Monat'
+                else:  # week
+                    # Extrahiere Woche aus Zeitraum und formatiere als "KW01", "KW02" etc.
+                    # Format von to_period('W') ist "2024-W01" (mit Bindestrich)
+                    # Versuche verschiedene Formate
+                    week_numbers = year_revenue_data['Zeitraum'].str.extract(r'W(\d+)', expand=False)
+                    # Falls das nicht funktioniert, versuche direkt aus dem Zeitraum zu extrahieren
+                    if week_numbers.isna().all():
+                        # Versuche Format wie "2024-W01" oder "2024W01" (ohne Leerzeichen)
+                        week_numbers = year_revenue_data['Zeitraum'].str.extract(r'[Ww](\d+)', expand=False)
+                    # Falls immer noch keine Werte, versuche aus dem Datum zu berechnen
+                    if week_numbers.isna().any():
+                        # Konvertiere nur die Zeilen mit NaN-Perioden zu datetime
+                        mask_na = week_numbers.isna()
+                        zeitraum_na = year_revenue_data.loc[mask_na, 'Zeitraum']
+                        # Konvertiere zu datetime
+                        dt_col = pd.to_datetime(zeitraum_na, errors='coerce')
+                        # Nur für gültige datetime-Werte die Woche berechnen
+                        for idx in dt_col.index:
+                            if pd.notna(dt_col.loc[idx]):
+                                try:
+                                    week_num = dt_col.loc[idx].isocalendar()[1]  # [1] ist die Woche
+                                    week_numbers.loc[idx] = str(week_num).zfill(2)
+                                except:
+                                    pass
+                    
+                    # Formatiere Wochen als "KW01", "KW02" etc.
+                    year_revenue_data['Periode'] = 'KW' + week_numbers.astype(str).str.zfill(2)
+                    
+                    # WICHTIG: Entferne nur Zeilen, die wirklich keine Periode haben (nicht wenn Jahr fehlt)
+                    # Behalte alle Zeilen mit gültiger Periode, auch wenn Jahr fehlt
+                    year_revenue_data = year_revenue_data.dropna(subset=['Periode'])
+                    # Falls Jahr fehlt, versuche es aus Zeitraum zu extrahieren
+                    if year_revenue_data['Jahr'].isna().any():
+                        year_revenue_data.loc[year_revenue_data['Jahr'].isna(), 'Jahr'] = year_revenue_data.loc[year_revenue_data['Jahr'].isna(), 'Zeitraum'].str.extract(r'(\d{4})', expand=False)
+                    # Entferne nur Zeilen ohne Jahr
+                    year_revenue_data = year_revenue_data.dropna(subset=['Jahr'])
+                    # Sortiere nach Jahr und Woche (extrahiere Woche-Nummer für Sortierung)
+                    year_revenue_data['Woche_Nr'] = pd.to_numeric(year_revenue_data['Periode'].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
+                    year_revenue_data = year_revenue_data.sort_values(['Jahr', 'Woche_Nr'])
+                    x_axis_col = 'Periode'
+                    x_axis_title = 'Woche'
+                    
+                    # Erstelle eine vollständige Liste aller Wochen für alle Jahre
+                    all_years = sorted(year_revenue_data['Jahr'].unique())
+                    all_weeks = sorted(year_revenue_data['Periode'].unique())
+                    
+                    # Stelle sicher, dass alle Wochen für alle Jahre in der Pivot-Tabelle vorhanden sind
+                    # Erstelle eine vollständige Kombination aus allen Jahren und Wochen
+                    from itertools import product
+                    complete_combinations = pd.DataFrame(list(product(all_weeks, all_years)), columns=['Periode', 'Jahr'])
+                    # Merge mit den tatsächlichen Daten
+                    year_revenue_data = complete_combinations.merge(
+                        year_revenue_data,
+                        on=['Periode', 'Jahr'],
+                        how='left'
+                    )
+                    # Fülle fehlende Umsatz-Werte mit 0
+                    year_revenue_data['Umsatz'] = year_revenue_data['Umsatz'].fillna(0)
+                
+                # Erstelle Pivot-Tabelle: Jahre als Spalten, Perioden als Zeilen
+                # WICHTIG: Verwende fill_value=0, damit alle Perioden angezeigt werden, auch wenn sie nur in einem Jahr vorhanden sind
+                pivot_data = year_revenue_data.pivot_table(
+                    index=x_axis_col,
+                    columns='Jahr',
+                    values='Umsatz',
+                    aggfunc='sum',
+                    fill_value=0
+                ).reset_index()
+                
+                # Sortiere Perioden
+                if period_key == 'month':
+                    # Sortiere nach Monatsnummer
+                    month_order = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 
+                                  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
+                    pivot_data['Monat_Order'] = pivot_data[x_axis_col].map({m: i for i, m in enumerate(month_order)})
+                    # Setze NaN-Werte auf hohe Zahl, damit sie am Ende sortiert werden
+                    pivot_data['Monat_Order'] = pivot_data['Monat_Order'].fillna(999)
+                    pivot_data = pivot_data.sort_values('Monat_Order').drop(columns='Monat_Order')
+                else:
+                    # Sortiere nach Wochennummer (extrahiere aus "KW01", "KW02" etc.)
+                    pivot_data['Woche_Order'] = pd.to_numeric(pivot_data[x_axis_col].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
+                    pivot_data = pivot_data.sort_values('Woche_Order').drop(columns='Woche_Order')
+                
+                # Berechne prozentuale Veränderung für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
+                from plotly.subplots import make_subplots
+                import plotly.graph_objects as go
+                
+                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # Farben für verschiedene Jahre
+                year_colors = {
+                    2023: '#d3d3d3',  # Hellgrau
+                    2024: '#1f77b4',  # Blau
+                    2025: '#ffd700',  # Gelb
+                    2026: '#2ca02c',  # Grün
+                    2027: '#d62728'   # Rot
+                }
+                
+                # Füge Balken für jedes Jahr hinzu
+                for year_col in pivot_data.columns:
+                    if year_col != x_axis_col:
+                        year = int(year_col)
+                        color = year_colors.get(year, '#1f77b4')
+                        fig_year_comparison.add_trace(
+                            go.Bar(
+                                x=pivot_data[x_axis_col],
+                                y=pivot_data[year_col],
+                                name=str(year),
+                                marker_color=color,
+                                text=[format_number_de(val, 0) if val > 0 else '' for val in pivot_data[year_col]],
+                                textposition='outside'
+                            ),
+                            secondary_y=False
+                        )
+                
+                # Berechne Wachstum für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
+                # Extrahiere Jahre aus Spaltennamen (können String oder Integer sein)
+                year_cols = [col for col in pivot_data.columns if col != x_axis_col]
+                years_sorted = sorted([int(col) if isinstance(col, (int, str)) and str(col).isdigit() else 0 for col in year_cols])
+                years_sorted = [y for y in years_sorted if y > 0]  # Entferne 0-Werte
+                
+                if len(years_sorted) > 1:
+                    # Berechne Wachstum für das neueste Jahr gegenüber dem Vorjahr
+                    latest_year = years_sorted[-1]
+                    prev_year = years_sorted[-2]
+                    
+                    # Prüfe ob die Spalten existieren (als String oder Integer)
+                    prev_col = None
+                    latest_col = None
+                    for col in pivot_data.columns:
+                        if col != x_axis_col:
+                            try:
+                                col_int = int(col) if isinstance(col, str) and col.isdigit() else (int(col) if isinstance(col, int) else None)
+                                if col_int == prev_year:
+                                    prev_col = col
+                                if col_int == latest_year:
+                                    latest_col = col
+                            except:
+                                pass
+                    
+                    if prev_col and latest_col:
+                        growth_data = []
+                        for idx, row in pivot_data.iterrows():
+                            prev_val = float(row[prev_col])
+                            curr_val = float(row[latest_col])
+                            if prev_val > 0:
+                                growth_pct = ((curr_val - prev_val) / prev_val) * 100
+                            else:
+                                growth_pct = 0.0 if curr_val == 0 else 100.0
+                            growth_data.append(growth_pct)
+                        
+                        # Linie für prozentuale Veränderung (rechte Y-Achse)
+                        # WICHTIG: Verwende die gleichen X-Werte wie die Balken
+                        fig_year_comparison.add_trace(
+                            go.Scatter(
+                                x=pivot_data[x_axis_col],
+                                y=growth_data,
+                                name='Wachstum',
+                                mode='lines+markers',
+                                line=dict(color='#ff7f0e', width=3),
+                                marker=dict(size=10, color='#ff7f0e'),
+                                text=[f"{val:+.1f}%" if val != 0 else "0%" for val in growth_data],
+                                textposition='top center'
+                            ),
+                            secondary_y=True
+                        )
+                
+                # Y-Achsen konfigurieren
+                fig_year_comparison.update_yaxes(
+                    title_text="Umsatz (€)",
+                    secondary_y=False,
+                    showgrid=True
+                )
+                fig_year_comparison.update_yaxes(
+                    title_text="Wachstum (%)",
+                    secondary_y=True,
+                    showgrid=False
+                )
+                
+                # Layout anpassen
+                period_title = {'week': 'Woche', 'month': 'Monat'}.get(period_key, '')
+                fig_year_comparison.update_layout(
+                    title=f'Jahresvergleich: Umsatz und Wachstum ({period_title})',
+                    height=500,
+                    xaxis_title=x_axis_title,
+                    hovermode='x unified',
+                    barmode='group',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_{period_key}_normal")
         
         # Neue KPIs
         st.subheader("📊 Zusätzliche KPIs")
@@ -2114,6 +2959,10 @@ if uploaded_files:
             else:
                 latest_df = filtered_df.copy()
             
+            # Prüfe ob latest_df leer ist - falls ja, verwende das gesamte filtered_df
+            if len(latest_df) == 0:
+                latest_df = filtered_df.copy()
+            
             # Bei kombinierter Ansicht: Zeige Top/Flop für beide Traffic-Typen
             if show_combined:
                 top_asins_normal, flop_asins_normal = get_top_flop_asins(latest_df, 'normal')
@@ -2202,6 +3051,7 @@ if uploaded_files:
                 with col1:
                     st.markdown("### 🟢 Top ASIN (nach Umsatz)")
                     row = top_asins.iloc[0]
+                    
                     with st.container():
                         st.markdown(f"**{row['ASIN']}**")
                         col_a, col_b = st.columns(2)
