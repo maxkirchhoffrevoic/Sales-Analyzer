@@ -2291,7 +2291,7 @@ if uploaded_files:
             
             fig_combined.update_layout(height=400, showlegend=True, barmode='group')
             fig_combined.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_combined, use_container_width=True)
+            st.plotly_chart(fig_combined, use_container_width=True, key=f"combined_chart_{period_key}")
         else:
             # Normale Ansicht (ein Traffic-Typ)
             fig_combined = make_subplots(
@@ -2353,294 +2353,7 @@ if uploaded_files:
             
             fig_combined.update_layout(height=400, showlegend=False)
             fig_combined.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_combined, use_container_width=True)
-        
-        # Jahresvergleich für Monat und YTD (nur bei Account-Level)
-        # NICHT für Wochenansicht
-        if is_account_level and 'Umsatz' in aggregated_data.columns and period_key != 'week':
-            st.subheader("📈 Jahresvergleich")
-            
-            # Bereite Daten für Jahresvergleich vor
-            year_revenue_data = aggregated_data.copy()
-            
-            if period_key == 'ytd':
-                # YTD: Zeige Jahreswerte
-                year_revenue_data['Jahr'] = year_revenue_data['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
-                year_revenue_data = year_revenue_data.groupby('Jahr')['Umsatz'].sum().reset_index()
-                year_revenue_data = year_revenue_data.sort_values('Jahr')
-                
-                # Berechne prozentuale Veränderung (gegenüber Vorjahr)
-                year_revenue_data['Wachstum (%)'] = 0.0
-                for i in range(1, len(year_revenue_data)):
-                    prev_revenue = year_revenue_data.iloc[i-1]['Umsatz']
-                    curr_revenue = year_revenue_data.iloc[i]['Umsatz']
-                    if prev_revenue > 0:
-                        growth_pct = ((curr_revenue - prev_revenue) / prev_revenue) * 100
-                        year_revenue_data.iloc[i, year_revenue_data.columns.get_loc('Wachstum (%)')] = growth_pct
-                
-                # Erstelle kombinierte Grafik mit Balken (Umsatz) und Linie (Wachstum %)
-                from plotly.subplots import make_subplots
-                import plotly.graph_objects as go
-                
-                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
-                
-                # Balken für Umsatz (linke Y-Achse)
-                fig_year_comparison.add_trace(
-                    go.Bar(
-                        x=year_revenue_data['Jahr'].astype(str),
-                        y=year_revenue_data['Umsatz'],
-                        name='Umsatz',
-                        marker_color='#1f77b4',
-                        text=[format_number_de(val, 0) for val in year_revenue_data['Umsatz']],
-                        textposition='outside'
-                    ),
-                    secondary_y=False
-                )
-                
-                # Linie für prozentuale Veränderung (rechte Y-Achse)
-                fig_year_comparison.add_trace(
-                    go.Scatter(
-                        x=year_revenue_data['Jahr'].astype(str),
-                        y=year_revenue_data['Wachstum (%)'],
-                        name='Wachstum',
-                        mode='lines+markers',
-                        line=dict(color='#ff7f0e', width=3),
-                        marker=dict(size=10, color='#ff7f0e'),
-                        text=[f"{val:+.1f}%" if val != 0 else "0%" for val in year_revenue_data['Wachstum (%)']],
-                        textposition='top center'
-                    ),
-                    secondary_y=True
-                )
-                
-                # Y-Achsen konfigurieren
-                fig_year_comparison.update_yaxes(
-                    title_text="Umsatz (€)",
-                    secondary_y=False
-                )
-                fig_year_comparison.update_yaxes(
-                    title_text="Wachstum (%)",
-                    secondary_y=True
-                )
-                
-                # Layout anpassen
-                fig_year_comparison.update_layout(
-                    title='Jahresvergleich: Umsatz und Wachstum (YTD)',
-                    height=500,
-                    xaxis_title='Jahr',
-                    hovermode='x unified',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                
-                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_ytd_normal")
-            else:
-                # Monat oder Woche: Zeige Perioden auf X-Achse, Jahre als verschiedene Serien
-                year_revenue_data['Jahr'] = year_revenue_data['Zeitraum'].str.extract(r'(\d{4})', expand=False).astype(int)
-                
-                # Deutsche Monatsnamen
-                month_names_de = {
-                    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April', 5: 'Mai', 6: 'Juni',
-                    7: 'Juli', 8: 'August', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
-                }
-                
-                if period_key == 'month':
-                    # Extrahiere Monat aus Zeitraum (z.B. "2024-01" -> "Januar")
-                    year_revenue_data['Monat_Nr'] = pd.to_datetime(year_revenue_data['Zeitraum'], errors='coerce').dt.month
-                    year_revenue_data['Periode'] = year_revenue_data['Monat_Nr'].map(month_names_de)
-                    # Sortiere nach Jahr und Monat
-                    year_revenue_data = year_revenue_data.sort_values(['Jahr', 'Monat_Nr'])
-                    x_axis_col = 'Periode'
-                    x_axis_title = 'Monat'
-                else:  # week
-                    # Extrahiere Woche aus Zeitraum und formatiere als "KW01", "KW02" etc.
-                    # Format von to_period('W') ist "2024-W01" (mit Bindestrich)
-                    # Versuche verschiedene Formate
-                    week_numbers = year_revenue_data['Zeitraum'].str.extract(r'W(\d+)', expand=False)
-                    # Falls das nicht funktioniert, versuche direkt aus dem Zeitraum zu extrahieren
-                    if week_numbers.isna().all():
-                        # Versuche Format wie "2024-W01" oder "2024W01" (ohne Leerzeichen)
-                        week_numbers = year_revenue_data['Zeitraum'].str.extract(r'[Ww](\d+)', expand=False)
-                    # Falls immer noch keine Werte, versuche aus dem Datum zu berechnen
-                    if week_numbers.isna().any():
-                        # Konvertiere nur die Zeilen mit NaN-Perioden zu datetime
-                        mask_na = week_numbers.isna()
-                        zeitraum_na = year_revenue_data.loc[mask_na, 'Zeitraum']
-                        # Konvertiere zu datetime
-                        dt_col = pd.to_datetime(zeitraum_na, errors='coerce')
-                        # Nur für gültige datetime-Werte die Woche berechnen
-                        for idx in dt_col.index:
-                            if pd.notna(dt_col.loc[idx]):
-                                try:
-                                    week_num = dt_col.loc[idx].isocalendar()[1]  # [1] ist die Woche
-                                    week_numbers.loc[idx] = str(week_num).zfill(2)
-                                except:
-                                    pass
-                    
-                    # Formatiere Wochen als "KW01", "KW02" etc.
-                    year_revenue_data['Periode'] = 'KW' + week_numbers.astype(str).str.zfill(2)
-                    
-                    # WICHTIG: Entferne nur Zeilen, die wirklich keine Periode haben (nicht wenn Jahr fehlt)
-                    # Behalte alle Zeilen mit gültiger Periode, auch wenn Jahr fehlt
-                    year_revenue_data = year_revenue_data.dropna(subset=['Periode'])
-                    # Falls Jahr fehlt, versuche es aus Zeitraum zu extrahieren
-                    if year_revenue_data['Jahr'].isna().any():
-                        year_revenue_data.loc[year_revenue_data['Jahr'].isna(), 'Jahr'] = year_revenue_data.loc[year_revenue_data['Jahr'].isna(), 'Zeitraum'].str.extract(r'(\d{4})', expand=False)
-                    # Entferne nur Zeilen ohne Jahr
-                    year_revenue_data = year_revenue_data.dropna(subset=['Jahr'])
-                    # Sortiere nach Jahr und Woche (extrahiere Woche-Nummer für Sortierung)
-                    year_revenue_data['Woche_Nr'] = pd.to_numeric(year_revenue_data['Periode'].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
-                    year_revenue_data = year_revenue_data.sort_values(['Jahr', 'Woche_Nr'])
-                    x_axis_col = 'Periode'
-                    x_axis_title = 'Woche'
-                    
-                    # Erstelle eine vollständige Liste aller Wochen für alle Jahre
-                    all_years = sorted(year_revenue_data['Jahr'].unique())
-                    all_weeks = sorted(year_revenue_data['Periode'].unique())
-                    
-                    # Stelle sicher, dass alle Wochen für alle Jahre in der Pivot-Tabelle vorhanden sind
-                    # Erstelle eine vollständige Kombination aus allen Jahren und Wochen
-                    from itertools import product
-                    complete_combinations = pd.DataFrame(list(product(all_weeks, all_years)), columns=['Periode', 'Jahr'])
-                    # Merge mit den tatsächlichen Daten
-                    year_revenue_data = complete_combinations.merge(
-                        year_revenue_data,
-                        on=['Periode', 'Jahr'],
-                        how='left'
-                    )
-                    # Fülle fehlende Umsatz-Werte mit 0
-                    year_revenue_data['Umsatz'] = year_revenue_data['Umsatz'].fillna(0)
-                
-                # Erstelle Pivot-Tabelle: Jahre als Spalten, Perioden als Zeilen
-                # WICHTIG: Verwende fill_value=0, damit alle Perioden angezeigt werden, auch wenn sie nur in einem Jahr vorhanden sind
-                pivot_data = year_revenue_data.pivot_table(
-                    index=x_axis_col,
-                    columns='Jahr',
-                    values='Umsatz',
-                    aggfunc='sum',
-                    fill_value=0
-                ).reset_index()
-                
-                # Sortiere Perioden
-                if period_key == 'month':
-                    # Sortiere nach Monatsnummer
-                    month_order = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 
-                                  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
-                    pivot_data['Monat_Order'] = pivot_data[x_axis_col].map({m: i for i, m in enumerate(month_order)})
-                    # Setze NaN-Werte auf hohe Zahl, damit sie am Ende sortiert werden
-                    pivot_data['Monat_Order'] = pivot_data['Monat_Order'].fillna(999)
-                    pivot_data = pivot_data.sort_values('Monat_Order').drop(columns='Monat_Order')
-                else:
-                    # Sortiere nach Wochennummer (extrahiere aus "KW01", "KW02" etc.)
-                    pivot_data['Woche_Order'] = pd.to_numeric(pivot_data[x_axis_col].str.extract(r'KW(\d+)')[0], errors='coerce').fillna(0).astype(int)
-                    pivot_data = pivot_data.sort_values('Woche_Order').drop(columns='Woche_Order')
-                
-                # Berechne prozentuale Veränderung für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
-                from plotly.subplots import make_subplots
-                import plotly.graph_objects as go
-                
-                fig_year_comparison = make_subplots(specs=[[{"secondary_y": True}]])
-                
-                # Farben für verschiedene Jahre
-                year_colors = {
-                    2023: '#d3d3d3',  # Hellgrau
-                    2024: '#1f77b4',  # Blau
-                    2025: '#ffd700',  # Gelb
-                    2026: '#2ca02c',  # Grün
-                    2027: '#d62728'   # Rot
-                }
-                
-                # Füge Balken für jedes Jahr hinzu
-                for year_col in pivot_data.columns:
-                    if year_col != x_axis_col:
-                        year = int(year_col)
-                        color = year_colors.get(year, '#1f77b4')
-                        fig_year_comparison.add_trace(
-                            go.Bar(
-                                x=pivot_data[x_axis_col],
-                                y=pivot_data[year_col],
-                                name=str(year),
-                                marker_color=color,
-                                text=[format_number_de(val, 0) if val > 0 else '' for val in pivot_data[year_col]],
-                                textposition='outside'
-                            ),
-                            secondary_y=False
-                        )
-                
-                # Berechne Wachstum für jedes Jahr (gegenüber Vorjahr, gleiche Periode)
-                # Extrahiere Jahre aus Spaltennamen (können String oder Integer sein)
-                year_cols = [col for col in pivot_data.columns if col != x_axis_col]
-                years_sorted = sorted([int(col) if isinstance(col, (int, str)) and str(col).isdigit() else 0 for col in year_cols])
-                years_sorted = [y for y in years_sorted if y > 0]  # Entferne 0-Werte
-                
-                if len(years_sorted) > 1:
-                    # Berechne Wachstum für das neueste Jahr gegenüber dem Vorjahr
-                    latest_year = years_sorted[-1]
-                    prev_year = years_sorted[-2]
-                    
-                    # Prüfe ob die Spalten existieren (als String oder Integer)
-                    prev_col = None
-                    latest_col = None
-                    for col in pivot_data.columns:
-                        if col != x_axis_col:
-                            try:
-                                col_int = int(col) if isinstance(col, str) and col.isdigit() else (int(col) if isinstance(col, int) else None)
-                                if col_int == prev_year:
-                                    prev_col = col
-                                if col_int == latest_year:
-                                    latest_col = col
-                            except:
-                                pass
-                    
-                    if prev_col and latest_col:
-                        growth_data = []
-                        for idx, row in pivot_data.iterrows():
-                            prev_val = float(row[prev_col])
-                            curr_val = float(row[latest_col])
-                            if prev_val > 0:
-                                growth_pct = ((curr_val - prev_val) / prev_val) * 100
-                            else:
-                                growth_pct = 0.0 if curr_val == 0 else 100.0
-                            growth_data.append(growth_pct)
-                        
-                        # Linie für prozentuale Veränderung (rechte Y-Achse)
-                        # WICHTIG: Verwende die gleichen X-Werte wie die Balken
-                        fig_year_comparison.add_trace(
-                            go.Scatter(
-                                x=pivot_data[x_axis_col],
-                                y=growth_data,
-                                name='Wachstum',
-                                mode='lines+markers',
-                                line=dict(color='#ff7f0e', width=3),
-                                marker=dict(size=10, color='#ff7f0e'),
-                                text=[f"{val:+.1f}%" if val != 0 else "0%" for val in growth_data],
-                                textposition='top center'
-                            ),
-                            secondary_y=True
-                        )
-                
-                # Y-Achsen konfigurieren
-                fig_year_comparison.update_yaxes(
-                    title_text="Umsatz (€)",
-                    secondary_y=False,
-                    showgrid=True
-                )
-                fig_year_comparison.update_yaxes(
-                    title_text="Wachstum (%)",
-                    secondary_y=True,
-                    showgrid=False
-                )
-                
-                # Layout anpassen
-                period_title = {'week': 'Woche', 'month': 'Monat'}.get(period_key, '')
-                fig_year_comparison.update_layout(
-                    title=f'Jahresvergleich: Umsatz und Wachstum ({period_title})',
-                    height=500,
-                    xaxis_title=x_axis_title,
-                    hovermode='x unified',
-                    barmode='group',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                
-                st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_{period_key}_normal")
+            st.plotly_chart(fig_combined, use_container_width=True, key=f"normal_chart_{period_key}")
         
         # Neue KPIs
         st.subheader("📊 Zusätzliche KPIs")
@@ -2671,7 +2384,10 @@ if uploaded_files:
                 fig_cr.update_traces(line_color='purple', marker_color='purple')
             fig_cr.update_layout(height=300)
             fig_cr.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_cr, use_container_width=True)
+            if show_combined:
+                st.plotly_chart(fig_cr, use_container_width=True, key=f"cr_chart_combined_{period_key}")
+            else:
+                st.plotly_chart(fig_cr, use_container_width=True, key=f"cr_chart_normal_{period_key}")
         
         with col2:
             if show_combined and 'Traffic_Typ' in aggregated_data.columns:
@@ -2696,7 +2412,10 @@ if uploaded_files:
                 fig_aov.update_traces(marker_color='orange')
             fig_aov.update_layout(height=300)
             fig_aov.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_aov, use_container_width=True)
+            if show_combined:
+                st.plotly_chart(fig_aov, use_container_width=True, key=f"aov_chart_combined_{period_key}")
+            else:
+                st.plotly_chart(fig_aov, use_container_width=True, key=f"aov_chart_normal_{period_key}")
         
         with col3:
             if show_combined and 'Traffic_Typ' in aggregated_data.columns:
@@ -2721,7 +2440,10 @@ if uploaded_files:
                 fig_rps.update_traces(marker_color='teal')
             fig_rps.update_layout(height=300)
             fig_rps.update_xaxes(title_text='Zeitraum')
-            st.plotly_chart(fig_rps, use_container_width=True)
+            if show_combined:
+                st.plotly_chart(fig_rps, use_container_width=True, key=f"rps_chart_combined_{period_key}")
+            else:
+                st.plotly_chart(fig_rps, use_container_width=True, key=f"rps_chart_normal_{period_key}")
         
         # Mobile vs Browser Performance (nur wenn Daten verfügbar)
         # Prüfe ob sowohl Mobile als auch Browser Daten vorhanden sind UND ob sie nicht alle 0 sind
@@ -2759,7 +2481,10 @@ if uploaded_files:
                     )
                     fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
                     fig_mobile_browser.update_xaxes(title_text='Zeitraum')
-                    st.plotly_chart(fig_mobile_browser, use_container_width=True)
+                    if show_combined:
+                        st.plotly_chart(fig_mobile_browser, use_container_width=True, key=f"mobile_browser_combined_{period_key}")
+                    else:
+                        st.plotly_chart(fig_mobile_browser, use_container_width=True, key=f"mobile_browser_normal_{period_key}")
                 
                 with col2:
                     # Berechne Mobile vs Browser Anteil
@@ -2786,7 +2511,10 @@ if uploaded_files:
                     )
                     fig_mobile_browser_pct.update_layout(height=350, barmode='stack')
                     fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
-                    st.plotly_chart(fig_mobile_browser_pct, use_container_width=True)
+                    if show_combined:
+                        st.plotly_chart(fig_mobile_browser_pct, use_container_width=True, key=f"mobile_browser_pct_combined_{period_key}")
+                    else:
+                        st.plotly_chart(fig_mobile_browser_pct, use_container_width=True, key=f"mobile_browser_pct_normal_{period_key}")
             # Wenn keine Daten vorhanden, wird die Sektion einfach nicht angezeigt
         
         # Zusammenfassung
