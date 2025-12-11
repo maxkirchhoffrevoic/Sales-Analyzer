@@ -2628,9 +2628,9 @@ if uploaded_files:
                 st.subheader("📱 Mobile vs Browser Performance")
                 
                 # Bereite Daten für Mobile vs Browser vor
-                mobile_browser_data = aggregated_data[['Zeitraum_Nr', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
+                mobile_browser_data = aggregated_data[['Zeitraum', 'Mobile Sitzungen', 'Browser Sitzungen']].copy()
                 mobile_browser_data = mobile_browser_data.melt(
-                    id_vars='Zeitraum_Nr',
+                    id_vars='Zeitraum',
                     value_vars=['Mobile Sitzungen', 'Browser Sitzungen'],
                     var_name='Gerät',
                     value_name='Sitzungen'
@@ -2641,14 +2641,14 @@ if uploaded_files:
                 with col1:
                     fig_mobile_browser = px.bar(
                         mobile_browser_data,
-                        x='Zeitraum_Nr',
+                        x='Zeitraum',
                         y='Sitzungen',
                         color='Gerät',
                         title=f'Mobile vs Browser Sitzungen ({traffic_type})',
-                        labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum_Nr': 'Zeitraum'},
+                        labels={'Sitzungen': 'Anzahl Sitzungen', 'Zeitraum': 'Zeitraum'},
                         color_discrete_map={'Mobile Sitzungen': '#1f77b4', 'Browser Sitzungen': '#ff7f0e'}
                     )
-                    fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
+                    fig_mobile_browser.update_layout(height=350)
                     fig_mobile_browser.update_xaxes(title_text='Zeitraum')
                     
                     # Deutsche Hover-Formatierung für Mobile vs Browser (Zahl)
