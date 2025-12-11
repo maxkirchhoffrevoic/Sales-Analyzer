@@ -101,6 +101,44 @@ def format_percentage_de(value, decimals=1):
             formatted = "+" + formatted
         return f"{formatted}%"
 
+def update_plotly_hover_de(fig, value_type='number', decimals=0, y_column_name=None):
+    """Aktualisiert Plotly-Grafiken für deutsche Hover-Formatierung
+    
+    Args:
+        fig: Plotly Figure-Objekt
+        value_type: Typ des Wertes ('number', 'currency', 'percentage')
+        decimals: Anzahl der Dezimalstellen (Standard: 0)
+        y_column_name: Name der Y-Spalte für das Hover-Template (optional)
+    """
+    y_label = y_column_name if y_column_name else '%{yaxis.title.text}'
+    
+    # Erstelle benutzerdefiniertes hovertemplate basierend auf Werttyp
+    if value_type == 'currency':
+        # Für Währung: Verwende format_number_de mit 2 Dezimalstellen
+        for trace in fig.data:
+            if hasattr(trace, 'y') and trace.y is not None:
+                # Erstelle customdata mit formatierten Werten
+                trace.customdata = [format_number_de(val, 2) + ' €' if pd.notna(val) else '0,00 €' for val in trace.y]
+                trace.hovertemplate = f'<b>%{{fullData.name}}</b><br>' + \
+                                     f'%{{xaxis.title.text}}: %{{x}}<br>' + \
+                                     f'{y_label}: %{{customdata}}<extra></extra>'
+    elif value_type == 'percentage':
+        # Für Prozent: Verwende format_percentage_de
+        for trace in fig.data:
+            if hasattr(trace, 'y') and trace.y is not None:
+                trace.customdata = [format_percentage_de(val, decimals) if pd.notna(val) else '0%' for val in trace.y]
+                trace.hovertemplate = f'<b>%{{fullData.name}}</b><br>' + \
+                                     f'%{{xaxis.title.text}}: %{{x}}<br>' + \
+                                     f'{y_label}: %{{customdata}}<extra></extra>'
+    else:
+        # Für normale Zahlen: Verwende format_number_de
+        for trace in fig.data:
+            if hasattr(trace, 'y') and trace.y is not None:
+                trace.customdata = [format_number_de(val, decimals) if pd.notna(val) else '0' for val in trace.y]
+                trace.hovertemplate = f'<b>%{{fullData.name}}</b><br>' + \
+                                     f'%{{xaxis.title.text}}: %{{x}}<br>' + \
+                                     f'{y_label}: %{{customdata}}<extra></extra>'
+
 def parse_euro_value(value):
     """Konvertiert Euro-Strings (z.B. '1.999,55 €' oder '368,14 €') zu Float"""
     if pd.isna(value) or value == '':
@@ -2017,13 +2055,33 @@ if uploaded_files:
                 )
                 
                 # Layout anpassen
+                # Konvertiere Jahre zu Strings für kategorische X-Achse
+                year_labels = year_revenue_combined['Jahr'].astype(str).tolist()
                 fig_year_comparison.update_layout(
                     title='Jahresvergleich: Umsatz und Wachstum (YTD)',
                     height=500,
                     xaxis_title='Jahr',
                     hovermode='x unified',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    xaxis=dict(
+                        type='category',
+                        tickmode='array',
+                        tickvals=year_labels,
+                        ticktext=year_labels,
+                        categoryorder='array',
+                        categoryarray=year_labels
+                    )
                 )
+                
+                # Deutsche Hover-Formatierung
+                # Für Umsatz (Balken): Währung
+                if len(fig_year_comparison.data) > 0:
+                    fig_year_comparison.data[0].customdata = [format_number_de(val, 0) + ' €' if pd.notna(val) else '0 €' for val in year_revenue_combined['Umsatz']]
+                    fig_year_comparison.data[0].hovertemplate = '<b>Umsatz</b><br>Jahr: %{x}<br>Umsatz: %{customdata}<extra></extra>'
+                # Für Wachstum (Linie): Prozent
+                if len(fig_year_comparison.data) > 1:
+                    fig_year_comparison.data[1].customdata = [format_percentage_de(val, 1) if pd.notna(val) else '0%' for val in year_revenue_combined['Wachstum (%)']]
+                    fig_year_comparison.data[1].hovertemplate = '<b>Wachstum</b><br>Jahr: %{x}<br>Wachstum: %{customdata}<extra></extra>'
                 
                 st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_ytd_combined")
             else:
@@ -2232,6 +2290,20 @@ if uploaded_files:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 
+                # Deutsche Hover-Formatierung für Jahresvergleich
+                # Für alle Balken (Umsatz): Währung
+                bar_traces = [trace for trace in fig_year_comparison.data if trace.type == 'bar']
+                for i, trace in enumerate(bar_traces):
+                    if hasattr(trace, 'y') and trace.y is not None:
+                        trace.customdata = [format_number_de(val, 0) + ' €' if pd.notna(val) else '0 €' for val in trace.y]
+                        trace.hovertemplate = f'<b>%{{fullData.name}}</b><br>{x_axis_title}: %{{x}}<br>Umsatz: %{{customdata}}<extra></extra>'
+                # Für Wachstumslinie: Prozent
+                scatter_traces = [trace for trace in fig_year_comparison.data if trace.type == 'scatter']
+                for trace in scatter_traces:
+                    if hasattr(trace, 'y') and trace.y is not None:
+                        trace.customdata = [format_percentage_de(val, 1) if pd.notna(val) else '0%' for val in trace.y]
+                        trace.hovertemplate = f'<b>Wachstum</b><br>{x_axis_title}: %{{x}}<br>Wachstum: %{{customdata}}<extra></extra>'
+                
                 st.plotly_chart(fig_year_comparison, use_container_width=True, key=f"year_comparison_{period_key}_combined")
         
         # KPI-Übersicht (Kombinierte Visualisierung)
@@ -2325,6 +2397,30 @@ if uploaded_files:
             
             fig_combined.update_layout(height=400, showlegend=True, barmode='group')
             fig_combined.update_xaxes(title_text='Zeitraum')
+            
+            # Deutsche Hover-Formatierung für kombinierte KPI-Grafik
+            # Die Traces sind in der Reihenfolge: Normal/B2B für Spalte 1, Normal/B2B für Spalte 2, Normal/B2B für Spalte 3
+            trace_index = 0
+            for trace in fig_combined.data:
+                if hasattr(trace, 'y') and trace.y is not None:
+                    # Bestimme den Werttyp basierend auf dem Trace-Index
+                    # Spalte 1 (Index 0-1): Bestellte Einheiten
+                    # Spalte 2 (Index 2-3): Umsatz
+                    # Spalte 3 (Index 4-5): Seitenaufrufe/Sitzungen
+                    if trace_index < 2:
+                        # Erste Spalte: Bestellte Einheiten (Zahl)
+                        trace.customdata = [format_number_de(val, 0) if pd.notna(val) else '0' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Bestellte Einheiten: %{customdata}<extra></extra>'
+                    elif trace_index < 4:
+                        # Zweite Spalte: Umsatz (Währung)
+                        trace.customdata = [format_number_de(val, 0) + ' €' if pd.notna(val) else '0 €' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Umsatz: %{customdata}<extra></extra>'
+                    else:
+                        # Dritte Spalte: Seitenaufrufe/Sitzungen (Zahl)
+                        trace.customdata = [format_number_de(val, 0) if pd.notna(val) else '0' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Anzahl: %{customdata}<extra></extra>'
+                    trace_index += 1
+            
             st.plotly_chart(fig_combined, use_container_width=True, key=f"combined_chart_{period_key}")
         else:
             # Normale Ansicht (ein Traffic-Typ)
@@ -2387,6 +2483,24 @@ if uploaded_files:
             
             fig_combined.update_layout(height=400, showlegend=False)
             fig_combined.update_xaxes(title_text='Zeitraum')
+            
+            # Deutsche Hover-Formatierung für normale KPI-Grafik
+            for i, trace in enumerate(fig_combined.data):
+                if hasattr(trace, 'y') and trace.y is not None:
+                    # Bestimme den Werttyp basierend auf dem Subplot-Index
+                    if i == 0:
+                        # Erste Spalte: Bestellte Einheiten (Zahl)
+                        trace.customdata = [format_number_de(val, 0) if pd.notna(val) else '0' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Bestellte Einheiten: %{customdata}<extra></extra>'
+                    elif i == 1:
+                        # Zweite Spalte: Umsatz (Währung)
+                        trace.customdata = [format_number_de(val, 0) + ' €' if pd.notna(val) else '0 €' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Umsatz: %{customdata}<extra></extra>'
+                    else:
+                        # Dritte Spalte: Seitenaufrufe/Sitzungen (Zahl)
+                        trace.customdata = [format_number_de(val, 0) if pd.notna(val) else '0' for val in trace.y]
+                        trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Anzahl: %{customdata}<extra></extra>'
+            
             st.plotly_chart(fig_combined, use_container_width=True, key=f"normal_chart_{period_key}")
         
         # Neue KPIs
@@ -2418,6 +2532,13 @@ if uploaded_files:
                 fig_cr.update_traces(line_color='purple', marker_color='purple')
             fig_cr.update_layout(height=300)
             fig_cr.update_xaxes(title_text='Zeitraum')
+            
+            # Deutsche Hover-Formatierung für Conversion Rate (Prozent)
+            for trace in fig_cr.data:
+                if hasattr(trace, 'y') and trace.y is not None:
+                    trace.customdata = [format_percentage_de(val, 2) if pd.notna(val) else '0%' for val in trace.y]
+                    trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Conversion Rate: %{customdata}<extra></extra>'
+            
             if show_combined:
                 st.plotly_chart(fig_cr, use_container_width=True, key=f"cr_chart_combined_{period_key}")
             else:
@@ -2446,6 +2567,13 @@ if uploaded_files:
                 fig_aov.update_traces(marker_color='orange')
             fig_aov.update_layout(height=300)
             fig_aov.update_xaxes(title_text='Zeitraum')
+            
+            # Deutsche Hover-Formatierung für AOV (Währung)
+            for trace in fig_aov.data:
+                if hasattr(trace, 'y') and trace.y is not None:
+                    trace.customdata = [format_number_de(val, 2) + ' €' if pd.notna(val) else '0,00 €' for val in trace.y]
+                    trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>AOV: %{customdata}<extra></extra>'
+            
             if show_combined:
                 st.plotly_chart(fig_aov, use_container_width=True, key=f"aov_chart_combined_{period_key}")
             else:
@@ -2474,6 +2602,13 @@ if uploaded_files:
                 fig_rps.update_traces(marker_color='teal')
             fig_rps.update_layout(height=300)
             fig_rps.update_xaxes(title_text='Zeitraum')
+            
+            # Deutsche Hover-Formatierung für Revenue per Session (Währung)
+            for trace in fig_rps.data:
+                if hasattr(trace, 'y') and trace.y is not None:
+                    trace.customdata = [format_number_de(val, 2) + ' €' if pd.notna(val) else '0,00 €' for val in trace.y]
+                    trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Revenue per Session: %{customdata}<extra></extra>'
+            
             if show_combined:
                 st.plotly_chart(fig_rps, use_container_width=True, key=f"rps_chart_combined_{period_key}")
             else:
@@ -2515,6 +2650,13 @@ if uploaded_files:
                     )
                     fig_mobile_browser.update_layout(height=350, xaxis=dict(tickmode='linear', tick0=1, dtick=1))
                     fig_mobile_browser.update_xaxes(title_text='Zeitraum')
+                    
+                    # Deutsche Hover-Formatierung für Mobile vs Browser (Zahl)
+                    for trace in fig_mobile_browser.data:
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            trace.customdata = [format_number_de(val, 0) if pd.notna(val) else '0' for val in trace.y]
+                            trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Sitzungen: %{customdata}<extra></extra>'
+                    
                     if show_combined:
                         st.plotly_chart(fig_mobile_browser, use_container_width=True, key=f"mobile_browser_combined_{period_key}")
                     else:
@@ -2545,6 +2687,13 @@ if uploaded_files:
                     )
                     fig_mobile_browser_pct.update_layout(height=350, barmode='stack')
                     fig_mobile_browser_pct.update_xaxes(title_text='Zeitraum')
+                    
+                    # Deutsche Hover-Formatierung für Mobile vs Browser Anteil (Prozent)
+                    for trace in fig_mobile_browser_pct.data:
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            trace.customdata = [format_percentage_de(val, 2) if pd.notna(val) else '0%' for val in trace.y]
+                            trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Anteil: %{customdata}<extra></extra>'
+                    
                     if show_combined:
                         st.plotly_chart(fig_mobile_browser_pct, use_container_width=True, key=f"mobile_browser_pct_combined_{period_key}")
                     else:
