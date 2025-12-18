@@ -2614,6 +2614,96 @@ if uploaded_files:
             else:
                 st.plotly_chart(fig_rps, use_container_width=True, key=f"rps_chart_normal_{period_key}")
         
+        # Umsatzaufteilung Normal vs B2B (nur in kombinierter Ansicht)
+        if show_combined and 'Traffic_Typ' in aggregated_data.columns:
+            st.subheader("💰 Umsatzaufteilung Normal vs B2B")
+            
+            # Berechne Gesamtumsatz für Normal und B2B
+            normal_data = aggregated_data[aggregated_data['Traffic_Typ'] == 'Normal']
+            b2b_data = aggregated_data[aggregated_data['Traffic_Typ'] == 'B2B']
+            
+            normal_revenue_total = normal_data['Umsatz'].sum() if len(normal_data) > 0 else 0
+            b2b_revenue_total = b2b_data['Umsatz'].sum() if len(b2b_data) > 0 else 0
+            total_revenue = normal_revenue_total + b2b_revenue_total
+            
+            if total_revenue > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Pie Chart für Gesamtumsatzaufteilung
+                    normal_revenue_formatted = format_number_de(normal_revenue_total, 0) + ' €'
+                    b2b_revenue_formatted = format_number_de(b2b_revenue_total, 0) + ' €'
+                    normal_revenue_pct = (normal_revenue_total / total_revenue * 100) if total_revenue > 0 else 0
+                    b2b_revenue_pct = (b2b_revenue_total / total_revenue * 100) if total_revenue > 0 else 0
+                    
+                    fig_revenue_pie = go.Figure(data=[go.Pie(
+                        labels=['Normal', 'B2B'],
+                        values=[normal_revenue_total, b2b_revenue_total],
+                        hole=0.4,
+                        marker_colors=['#1f77b4', '#ff7f0e'],
+                        textinfo='label+percent',
+                        texttemplate='%{label}<br>%{percent}<br>%{customdata}',
+                        customdata=[normal_revenue_formatted, b2b_revenue_formatted],
+                        hovertemplate='<b>%{label}</b><br>Umsatz: %{customdata}<br>Anteil: %{percent}<extra></extra>'
+                    )])
+                    fig_revenue_pie.update_layout(
+                        title='Gesamtumsatzaufteilung',
+                        height=400,
+                        showlegend=True
+                    )
+                    st.plotly_chart(fig_revenue_pie, use_container_width=True, key=f"revenue_pie_combined_{period_key}")
+                
+                with col2:
+                    # Stacked Bar Chart für Umsatzaufteilung über Zeiträume
+                    revenue_split_data = aggregated_data[['Zeitraum', 'Umsatz', 'Traffic_Typ']].copy()
+                    revenue_split_pivot = revenue_split_data.pivot_table(
+                        index='Zeitraum',
+                        columns='Traffic_Typ',
+                        values='Umsatz',
+                        aggfunc='sum',
+                        fill_value=0
+                    ).reset_index()
+                    
+                    # Berechne Prozentsätze
+                    if 'Normal' in revenue_split_pivot.columns and 'B2B' in revenue_split_pivot.columns:
+                        total_per_period = revenue_split_pivot['Normal'] + revenue_split_pivot['B2B']
+                        revenue_split_pivot['Normal %'] = (revenue_split_pivot['Normal'] / total_per_period.replace(0, np.nan) * 100).fillna(0)
+                        revenue_split_pivot['B2B %'] = (revenue_split_pivot['B2B'] / total_per_period.replace(0, np.nan) * 100).fillna(0)
+                        
+                        revenue_split_pct_data = revenue_split_pivot[['Zeitraum', 'Normal %', 'B2B %']].melt(
+                            id_vars='Zeitraum',
+                            value_vars=['Normal %', 'B2B %'],
+                            var_name='Traffic_Typ',
+                            value_name='Anteil (%)'
+                        )
+                        revenue_split_pct_data['Traffic_Typ'] = revenue_split_pct_data['Traffic_Typ'].replace({'Normal %': 'Normal', 'B2B %': 'B2B'})
+                        
+                        fig_revenue_split = px.bar(
+                            revenue_split_pct_data,
+                            x='Zeitraum',
+                            y='Anteil (%)',
+                            color='Traffic_Typ',
+                            title='Umsatzaufteilung nach Zeitraum',
+                            labels={'Anteil (%)': 'Anteil (%)', 'Zeitraum': 'Zeitraum', 'Traffic_Typ': 'Traffic-Typ'},
+                            color_discrete_map={'Normal': '#1f77b4', 'B2B': '#ff7f0e'},
+                            barmode='stack'
+                        )
+                        fig_revenue_split.update_layout(height=400)
+                        fig_revenue_split.update_xaxes(title_text='Zeitraum')
+                        fig_revenue_split.update_yaxes(title_text='Anteil (%)', range=[0, 100])
+                        
+                        # Deutsche Hover-Formatierung für Umsatzaufteilung (Prozent)
+                        for trace in fig_revenue_split.data:
+                            if hasattr(trace, 'y') and trace.y is not None:
+                                trace.customdata = [format_percentage_de(val, 2) if pd.notna(val) else '0%' for val in trace.y]
+                                trace.hovertemplate = '<b>%{fullData.name}</b><br>Zeitraum: %{x}<br>Anteil: %{customdata}<extra></extra>'
+                        
+                        st.plotly_chart(fig_revenue_split, use_container_width=True, key=f"revenue_split_combined_{period_key}")
+                    else:
+                        st.info("Keine Daten für Umsatzaufteilung verfügbar.")
+            else:
+                st.info("Keine Umsatzdaten verfügbar.")
+        
         # Mobile vs Browser Performance (nur wenn Daten verfügbar)
         # Prüfe ob sowohl Mobile als auch Browser Daten vorhanden sind UND ob sie nicht alle 0 sind
         has_mobile_data = 'Mobile Sitzungen' in aggregated_data.columns
