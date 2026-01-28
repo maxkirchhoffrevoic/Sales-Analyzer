@@ -813,7 +813,7 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             # Dies verhindert, dass Werte als Strings verkettet werden statt summiert
             aggregated[col] = pd.to_numeric(aggregated[col], errors='coerce').fillna(0)
     
-    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Seitenaufrufe (mit Non-Breaking Space)
     # WICHTIG: Suche die CR-Spalte in aggregated (nach Aggregation), aber verwende die ursprünglich gefundene cr_col wenn sie noch vorhanden ist
     cr_col_after_agg = None
     if cr_col and cr_col in aggregated.columns:
@@ -835,35 +835,37 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
             debug_df = aggregated[['Zeitraum', cr_col_after_agg, 'Conversion Rate (%)']].copy()
             debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert)'
             st.dataframe(debug_df, use_container_width=True)
-    else:
-        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+    elif views_col and views_col in aggregated.columns and orders_col and orders_col in aggregated.columns:
+        # Fallback: Berechne aus Bestellposten / Seitenaufrufe * 100
         # Debug-Ausgabe vor der Berechnung
-        with st.expander("🔍 Debug: Conversion Rate Berechnung (aus Bestellungen/Sitzungen)", expanded=False):
+        with st.expander("🔍 Debug: Conversion Rate Berechnung (aus Bestellungen/Seitenaufrufe)", expanded=False):
             st.write(f"**Traffic-Typ:** {traffic_type}")
             st.write(f"**Verwendete Spalten:**")
             st.write(f"- Bestellungen: `{orders_col}`")
-            st.write(f"- Sitzungen: `{sessions_col}`")
+            st.write(f"- Seitenaufrufe: `{views_col}`")
             st.write("**Berechnung pro Zeitraum:**")
-            debug_df = aggregated[['Zeitraum', orders_col, sessions_col]].copy()
+            debug_df = aggregated[['Zeitraum', orders_col, views_col]].copy()
             debug_df['Bestellungen'] = debug_df[orders_col]
-            debug_df['Sitzungen'] = debug_df[sessions_col]
+            debug_df['Seitenaufrufe'] = debug_df[views_col]
             debug_df['Berechnung'] = debug_df.apply(
-                lambda row: f"{row[orders_col]} / {row[sessions_col]} * 100" if pd.notna(row[sessions_col]) and row[sessions_col] != 0 
-                else "0 (Sitzungen = 0 oder NaN)",
+                lambda row: f"{row[orders_col]} / {row[views_col]} * 100" if pd.notna(row[views_col]) and row[views_col] != 0 
+                else "0 (Seitenaufrufe = 0 oder NaN)",
                 axis=1
             )
             debug_df['Ergebnis (%)'] = (
-                (debug_df[orders_col] / debug_df[sessions_col].replace(0, np.nan) * 100)
+                (debug_df[orders_col] / debug_df[views_col].replace(0, np.nan) * 100)
                 .fillna(0)
                 .replace([np.inf, -np.inf], 0)
             )
-            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Seitenaufrufe', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
         
         aggregated['Conversion Rate (%)'] = (
-            (aggregated[orders_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
+            (aggregated[orders_col] / aggregated[views_col].replace(0, np.nan) * 100)
             .fillna(0)
             .replace([np.inf, -np.inf], 0)
         )
+    else:
+        aggregated['Conversion Rate (%)'] = 0
     
     # AOV = Umsatz / Anzahl der Bestellposten
     # Prüfe zuerst, ob bereits eine AOV-Spalte in den Originaldaten vorhanden ist
@@ -1097,10 +1099,11 @@ def aggregate_by_period(df, period='week', traffic_type='normal'):
         units_col_agg = 'Bestellte Einheiten'
     
     revenue_col_agg = 'Umsatz' if 'Umsatz' in aggregated.columns else None
+    views_col_agg = 'Seitenaufrufe' if 'Seitenaufrufe' in aggregated.columns else None
     sessions_col_agg = 'Sitzungen' if 'Sitzungen' in aggregated.columns else None
     orders_col_agg = 'Bestellungen' if 'Bestellungen' in aggregated.columns else None
     
-    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Seitenaufrufe (mit Non-Breaking Space)
     # WICHTIG: Verwende den übergebenen traffic_type Parameter, um die richtige CR-Spalte zu finden
     cr_col = find_cr_column(aggregated, traffic_type)
     
@@ -1116,35 +1119,37 @@ def aggregate_by_period(df, period='week', traffic_type='normal'):
             debug_df = aggregated[['Zeitraum', cr_col, 'Conversion Rate (%)']].copy()
             debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert)'
             st.dataframe(debug_df, use_container_width=True)
-    elif orders_col_agg and sessions_col_agg:
-        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+    elif orders_col_agg and views_col_agg:
+        # Fallback: Berechne aus Bestellposten / Seitenaufrufe * 100
         # Debug-Ausgabe vor der Berechnung
-        with st.expander("🔍 Debug: Conversion Rate Berechnung für aggregierte Zeiträume (aus Bestellungen/Sitzungen)", expanded=False):
+        with st.expander("🔍 Debug: Conversion Rate Berechnung für aggregierte Zeiträume (aus Bestellungen/Seitenaufrufe)", expanded=False):
             st.write(f"**Traffic-Typ:** {traffic_type}")
             st.write(f"**Verwendete Spalten:**")
             st.write(f"- Bestellungen: `{orders_col_agg}`")
-            st.write(f"- Sitzungen: `{sessions_col_agg}`")
+            st.write(f"- Seitenaufrufe: `{views_col_agg}`")
             st.write("**Berechnung pro Zeitraum:**")
-            debug_df = aggregated[['Zeitraum', orders_col_agg, sessions_col_agg]].copy()
+            debug_df = aggregated[['Zeitraum', orders_col_agg, views_col_agg]].copy()
             debug_df['Bestellungen'] = debug_df[orders_col_agg]
-            debug_df['Sitzungen'] = debug_df[sessions_col_agg]
+            debug_df['Seitenaufrufe'] = debug_df[views_col_agg]
             debug_df['Berechnung'] = debug_df.apply(
-                lambda row: f"{row[orders_col_agg]} / {row[sessions_col_agg]} * 100" if pd.notna(row[sessions_col_agg]) and row[sessions_col_agg] != 0 
-                else "0 (Sitzungen = 0 oder NaN)",
+                lambda row: f"{row[orders_col_agg]} / {row[views_col_agg]} * 100" if pd.notna(row[views_col_agg]) and row[views_col_agg] != 0 
+                else "0 (Seitenaufrufe = 0 oder NaN)",
                 axis=1
             )
             debug_df['Ergebnis (%)'] = (
-                (debug_df[orders_col_agg] / debug_df[sessions_col_agg].replace(0, np.nan) * 100)
+                (debug_df[orders_col_agg] / debug_df[views_col_agg].replace(0, np.nan) * 100)
                 .fillna(0)
                 .replace([np.inf, -np.inf], 0)
             )
-            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Seitenaufrufe', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
         
         aggregated['Conversion Rate (%)'] = (
-            (aggregated[orders_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan) * 100)
+            (aggregated[orders_col_agg] / aggregated[views_col_agg].replace(0, np.nan) * 100)
             .fillna(0)
             .replace([np.inf, -np.inf], 0)
         )
+    else:
+        aggregated['Conversion Rate (%)'] = 0
     
     # AOV = Umsatz / Anzahl der Bestellposten
     if revenue_col_agg and orders_col_agg:
@@ -1241,7 +1246,7 @@ def get_top_flop_asins(df, traffic_type='normal'):
             asin_data[col] = pd.to_numeric(asin_data[col], errors='coerce').fillna(0)
     
     # Berechne KPIs
-    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+    # Conversion Rate: Verwende vorhandene Spalte oder berechne aus Bestellposten / Seitenaufrufe (mit Non-Breaking Space)
     cr_col = find_cr_column(df, traffic_type)
     
     if cr_col and cr_col in df.columns:
@@ -1260,35 +1265,35 @@ def get_top_flop_asins(df, traffic_type='normal'):
             debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert pro ASIN)'
             st.dataframe(debug_df, use_container_width=True)
     else:
-        # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+        # Fallback: Berechne aus Bestellposten / Seitenaufrufe * 100
         # WICHTIG: Prüfe ob Spalten vorhanden sind
-        if sessions_col and sessions_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
+        if views_col and views_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
             # Debug-Ausgabe vor der Berechnung
-            with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN (aus Bestellungen/Sitzungen)", expanded=False):
+            with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN (aus Bestellungen/Seitenaufrufe)", expanded=False):
                 st.write(f"**Traffic-Typ:** {traffic_type}")
                 st.write(f"**Verwendete Spalten:**")
                 st.write(f"- Bestellungen: `{orders_col}`")
-                st.write(f"- Sitzungen: `{sessions_col}`")
+                st.write(f"- Seitenaufrufe: `{views_col}`")
                 st.write("**Berechnung pro ASIN (Top 10):**")
-                debug_df = asin_data[[asin_column, orders_col, sessions_col]].head(10).copy()
+                debug_df = asin_data[[asin_column, orders_col, views_col]].head(10).copy()
                 debug_df['Bestellungen'] = debug_df[orders_col]
-                debug_df['Sitzungen'] = debug_df[sessions_col]
+                debug_df['Seitenaufrufe'] = debug_df[views_col]
                 debug_df['Berechnung'] = debug_df.apply(
-                    lambda row: f"{row[orders_col]} / {row[sessions_col]} * 100" if pd.notna(row[sessions_col]) and row[sessions_col] != 0 
-                    else "0 (Sitzungen = 0 oder NaN)",
+                    lambda row: f"{row[orders_col]} / {row[views_col]} * 100" if pd.notna(row[views_col]) and row[views_col] != 0 
+                    else "0 (Seitenaufrufe = 0 oder NaN)",
                     axis=1
                 )
-                sessions_safe_debug = debug_df[sessions_col].replace(0, np.nan)
+                views_safe_debug = debug_df[views_col].replace(0, np.nan)
                 debug_df['Ergebnis (%)'] = (
-                    (debug_df[orders_col].astype(float) / sessions_safe_debug.astype(float) * 100)
+                    (debug_df[orders_col].astype(float) / views_safe_debug.astype(float) * 100)
                     .fillna(0)
                     .replace([np.inf, -np.inf], 0)
                 )
-                st.dataframe(debug_df[[asin_column, 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+                st.dataframe(debug_df[[asin_column, 'Bestellungen', 'Seitenaufrufe', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
             
-            sessions_safe = asin_data[sessions_col].replace(0, np.nan)
+            views_safe = asin_data[views_col].replace(0, np.nan)
             asin_data['Conversion Rate (%)'] = (
-                (asin_data[orders_col].astype(float) / sessions_safe.astype(float) * 100)
+                (asin_data[orders_col].astype(float) / views_safe.astype(float) * 100)
                 .fillna(0)
                 .replace([np.inf, -np.inf], 0)
             )
@@ -1299,7 +1304,7 @@ def get_top_flop_asins(df, traffic_type='normal'):
             with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN", expanded=False):
                 st.warning(f"⚠️ Spalten für Conversion Rate Berechnung fehlen:")
                 st.write(f"- Bestellungen-Spalte vorhanden: {orders_col and orders_col in asin_data.columns}")
-                st.write(f"- Sitzungen-Spalte vorhanden: {sessions_col and sessions_col in asin_data.columns}")
+                st.write(f"- Seitenaufrufe-Spalte vorhanden: {views_col and views_col in asin_data.columns}")
                 st.write("**Ergebnis:** Conversion Rate wurde auf 0 gesetzt")
     
     # AOV: Revenue / Orders
@@ -3179,7 +3184,7 @@ if uploaded_files:
                 else:
                     units_col_summary = None
             
-            # Conversion Rate: Verwende vorhandene Spalten oder berechne aus Bestellposten / Sitzungen (mit Non-Breaking Space)
+            # Conversion Rate: Verwende vorhandene Spalten oder berechne aus Bestellposten / Seitenaufrufe (mit Non-Breaking Space)
             cr_col_normal_summary = find_cr_column(summary_data, 'normal')
             cr_col_b2b_summary = find_cr_column(summary_data, 'B2B')
             
@@ -3205,32 +3210,34 @@ if uploaded_files:
                     debug_df = summary_data[['Zeitraum', cr_col_b2b_summary, 'Conversion Rate (%)']].copy()
                     debug_df['Quelle'] = 'B2B Conversion Rate Spalte'
                     st.dataframe(debug_df, use_container_width=True)
-            elif 'Sitzungen' in summary_data.columns and 'Bestellungen' in summary_data.columns:
-                # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+            elif 'Seitenaufrufe' in summary_data.columns and 'Bestellungen' in summary_data.columns:
+                # Fallback: Berechne aus Bestellposten / Seitenaufrufe * 100
                 # Debug-Ausgabe vor der Berechnung
-                with st.expander("🔍 Debug: Conversion Rate Berechnung für Summary (aus Bestellungen/Sitzungen)", expanded=False):
+                with st.expander("🔍 Debug: Conversion Rate Berechnung für Summary (aus Bestellungen/Seitenaufrufe)", expanded=False):
                     st.write("**Verwendete Spalten:**")
                     st.write("- Bestellungen: `Bestellungen`")
-                    st.write("- Sitzungen: `Sitzungen`")
+                    st.write("- Seitenaufrufe: `Seitenaufrufe`")
                     st.write("**Berechnung pro Zeitraum:**")
-                    debug_df = summary_data[['Zeitraum', 'Bestellungen', 'Sitzungen']].copy()
+                    debug_df = summary_data[['Zeitraum', 'Bestellungen', 'Seitenaufrufe']].copy()
                     debug_df['Berechnung'] = debug_df.apply(
-                        lambda row: f"{row['Bestellungen']} / {row['Sitzungen']} * 100" if pd.notna(row['Sitzungen']) and row['Sitzungen'] != 0 
-                        else "0 (Sitzungen = 0 oder NaN)",
+                        lambda row: f"{row['Bestellungen']} / {row['Seitenaufrufe']} * 100" if pd.notna(row['Seitenaufrufe']) and row['Seitenaufrufe'] != 0 
+                        else "0 (Seitenaufrufe = 0 oder NaN)",
                         axis=1
                     )
                     debug_df['Ergebnis (%)'] = (
-                        (debug_df['Bestellungen'] / debug_df['Sitzungen'].replace(0, np.nan) * 100)
+                        (debug_df['Bestellungen'] / debug_df['Seitenaufrufe'].replace(0, np.nan) * 100)
                         .fillna(0)
                         .replace([np.inf, -np.inf], 0)
                     )
                     st.dataframe(debug_df, use_container_width=True)
                 
                 summary_data['Conversion Rate (%)'] = (
-                    (summary_data['Bestellungen'] / summary_data['Sitzungen'].replace(0, np.nan) * 100)
+                    (summary_data['Bestellungen'] / summary_data['Seitenaufrufe'].replace(0, np.nan) * 100)
                     .fillna(0)
                     .replace([np.inf, -np.inf], 0)
                 )
+            else:
+                summary_data['Conversion Rate (%)'] = 0
             if 'Bestellungen' in summary_data.columns and 'Umsatz' in summary_data.columns:
                 summary_data['AOV (€)'] = (
                     (summary_data['Umsatz'] / summary_data['Bestellungen'].replace(0, np.nan))
