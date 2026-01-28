@@ -826,8 +826,39 @@ def aggregate_data(df, traffic_type='normal', is_account_level=False):
     if cr_col_after_agg and cr_col_after_agg in aggregated.columns:
         # Verwende vorhandene Conversion Rate Spalte (bereits als Mittelwert aggregiert)
         aggregated['Conversion Rate (%)'] = aggregated[cr_col_after_agg].fillna(0)
+        
+        # Debug-Ausgabe für vorhandene Conversion Rate Spalte
+        with st.expander("🔍 Debug: Conversion Rate Berechnung (aus vorhandener Spalte)", expanded=False):
+            st.write(f"**Verwendete Spalte:** `{cr_col_after_agg}`")
+            st.write(f"**Traffic-Typ:** {traffic_type}")
+            st.write("**Berechnete Werte pro Zeitraum:**")
+            debug_df = aggregated[['Zeitraum', cr_col_after_agg, 'Conversion Rate (%)']].copy()
+            debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert)'
+            st.dataframe(debug_df, use_container_width=True)
     else:
         # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+        # Debug-Ausgabe vor der Berechnung
+        with st.expander("🔍 Debug: Conversion Rate Berechnung (aus Bestellungen/Sitzungen)", expanded=False):
+            st.write(f"**Traffic-Typ:** {traffic_type}")
+            st.write(f"**Verwendete Spalten:**")
+            st.write(f"- Bestellungen: `{orders_col}`")
+            st.write(f"- Sitzungen: `{sessions_col}`")
+            st.write("**Berechnung pro Zeitraum:**")
+            debug_df = aggregated[['Zeitraum', orders_col, sessions_col]].copy()
+            debug_df['Bestellungen'] = debug_df[orders_col]
+            debug_df['Sitzungen'] = debug_df[sessions_col]
+            debug_df['Berechnung'] = debug_df.apply(
+                lambda row: f"{row[orders_col]} / {row[sessions_col]} * 100" if pd.notna(row[sessions_col]) and row[sessions_col] != 0 
+                else "0 (Sitzungen = 0 oder NaN)",
+                axis=1
+            )
+            debug_df['Ergebnis (%)'] = (
+                (debug_df[orders_col] / debug_df[sessions_col].replace(0, np.nan) * 100)
+                .fillna(0)
+                .replace([np.inf, -np.inf], 0)
+            )
+            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+        
         aggregated['Conversion Rate (%)'] = (
             (aggregated[orders_col] / aggregated[sessions_col].replace(0, np.nan) * 100)
             .fillna(0)
@@ -1076,8 +1107,39 @@ def aggregate_by_period(df, period='week', traffic_type='normal'):
     if cr_col and cr_col in aggregated.columns:
         # Verwende die gefundene CR-Spalte (bereits als Mittelwert aggregiert)
         aggregated['Conversion Rate (%)'] = aggregated[cr_col].fillna(0)
+        
+        # Debug-Ausgabe für vorhandene Conversion Rate Spalte
+        with st.expander("🔍 Debug: Conversion Rate Berechnung für aggregierte Zeiträume (aus vorhandener Spalte)", expanded=False):
+            st.write(f"**Verwendete Spalte:** `{cr_col}`")
+            st.write(f"**Traffic-Typ:** {traffic_type}")
+            st.write("**Berechnete Werte pro Zeitraum:**")
+            debug_df = aggregated[['Zeitraum', cr_col, 'Conversion Rate (%)']].copy()
+            debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert)'
+            st.dataframe(debug_df, use_container_width=True)
     elif orders_col_agg and sessions_col_agg:
         # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+        # Debug-Ausgabe vor der Berechnung
+        with st.expander("🔍 Debug: Conversion Rate Berechnung für aggregierte Zeiträume (aus Bestellungen/Sitzungen)", expanded=False):
+            st.write(f"**Traffic-Typ:** {traffic_type}")
+            st.write(f"**Verwendete Spalten:**")
+            st.write(f"- Bestellungen: `{orders_col_agg}`")
+            st.write(f"- Sitzungen: `{sessions_col_agg}`")
+            st.write("**Berechnung pro Zeitraum:**")
+            debug_df = aggregated[['Zeitraum', orders_col_agg, sessions_col_agg]].copy()
+            debug_df['Bestellungen'] = debug_df[orders_col_agg]
+            debug_df['Sitzungen'] = debug_df[sessions_col_agg]
+            debug_df['Berechnung'] = debug_df.apply(
+                lambda row: f"{row[orders_col_agg]} / {row[sessions_col_agg]} * 100" if pd.notna(row[sessions_col_agg]) and row[sessions_col_agg] != 0 
+                else "0 (Sitzungen = 0 oder NaN)",
+                axis=1
+            )
+            debug_df['Ergebnis (%)'] = (
+                (debug_df[orders_col_agg] / debug_df[sessions_col_agg].replace(0, np.nan) * 100)
+                .fillna(0)
+                .replace([np.inf, -np.inf], 0)
+            )
+            st.dataframe(debug_df[['Zeitraum', 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+        
         aggregated['Conversion Rate (%)'] = (
             (aggregated[orders_col_agg] / aggregated[sessions_col_agg].replace(0, np.nan) * 100)
             .fillna(0)
@@ -1188,10 +1250,42 @@ def get_top_flop_asins(df, traffic_type='normal'):
         asin_cr.columns = [asin_column, 'Conversion Rate (%)']
         asin_data = asin_data.merge(asin_cr, on=asin_column, how='left')
         asin_data['Conversion Rate (%)'] = pd.to_numeric(asin_data['Conversion Rate (%)'], errors='coerce').fillna(0)
+        
+        # Debug-Ausgabe für ASIN Conversion Rate aus vorhandener Spalte
+        with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN (aus vorhandener Spalte)", expanded=False):
+            st.write(f"**Verwendete Spalte:** `{cr_col}`")
+            st.write(f"**Traffic-Typ:** {traffic_type}")
+            st.write("**Berechnete Werte pro ASIN (Top 10):**")
+            debug_df = asin_data[[asin_column, 'Conversion Rate (%)']].head(10).copy()
+            debug_df['Quelle'] = 'Vorhandene CR-Spalte (Mittelwert pro ASIN)'
+            st.dataframe(debug_df, use_container_width=True)
     else:
         # Fallback: Berechne aus Bestellposten / Sitzungen * 100
         # WICHTIG: Prüfe ob Spalten vorhanden sind
         if sessions_col and sessions_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
+            # Debug-Ausgabe vor der Berechnung
+            with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN (aus Bestellungen/Sitzungen)", expanded=False):
+                st.write(f"**Traffic-Typ:** {traffic_type}")
+                st.write(f"**Verwendete Spalten:**")
+                st.write(f"- Bestellungen: `{orders_col}`")
+                st.write(f"- Sitzungen: `{sessions_col}`")
+                st.write("**Berechnung pro ASIN (Top 10):**")
+                debug_df = asin_data[[asin_column, orders_col, sessions_col]].head(10).copy()
+                debug_df['Bestellungen'] = debug_df[orders_col]
+                debug_df['Sitzungen'] = debug_df[sessions_col]
+                debug_df['Berechnung'] = debug_df.apply(
+                    lambda row: f"{row[orders_col]} / {row[sessions_col]} * 100" if pd.notna(row[sessions_col]) and row[sessions_col] != 0 
+                    else "0 (Sitzungen = 0 oder NaN)",
+                    axis=1
+                )
+                sessions_safe_debug = debug_df[sessions_col].replace(0, np.nan)
+                debug_df['Ergebnis (%)'] = (
+                    (debug_df[orders_col].astype(float) / sessions_safe_debug.astype(float) * 100)
+                    .fillna(0)
+                    .replace([np.inf, -np.inf], 0)
+                )
+                st.dataframe(debug_df[[asin_column, 'Bestellungen', 'Sitzungen', 'Berechnung', 'Ergebnis (%)']], use_container_width=True)
+            
             sessions_safe = asin_data[sessions_col].replace(0, np.nan)
             asin_data['Conversion Rate (%)'] = (
                 (asin_data[orders_col].astype(float) / sessions_safe.astype(float) * 100)
@@ -1200,6 +1294,13 @@ def get_top_flop_asins(df, traffic_type='normal'):
             )
         else:
             asin_data['Conversion Rate (%)'] = 0
+            
+            # Debug-Ausgabe wenn Spalten fehlen
+            with st.expander("🔍 Debug: Conversion Rate Berechnung pro ASIN", expanded=False):
+                st.warning(f"⚠️ Spalten für Conversion Rate Berechnung fehlen:")
+                st.write(f"- Bestellungen-Spalte vorhanden: {orders_col and orders_col in asin_data.columns}")
+                st.write(f"- Sitzungen-Spalte vorhanden: {sessions_col and sessions_col in asin_data.columns}")
+                st.write("**Ergebnis:** Conversion Rate wurde auf 0 gesetzt")
     
     # AOV: Revenue / Orders
     if revenue_col and revenue_col in asin_data.columns and orders_col and orders_col in asin_data.columns:
@@ -1294,6 +1395,209 @@ def get_top_flop_asins(df, traffic_type='normal'):
         flop_asins = None
     
     return top_asins, flop_asins
+
+def find_previous_year_period(period_str, all_periods):
+    """Findet den entsprechenden Zeitraum des Vorjahres"""
+    if not period_str or not all_periods:
+        return None
+    
+    # Versuche verschiedene Formate zu erkennen
+    # Format 1: "2024-01" (Jahr-Monat)
+    if re.match(r'^\d{4}-\d{2}$', str(period_str)):
+        year = int(str(period_str)[:4])
+        month = str(period_str)[5:7]
+        prev_year_period = f"{year-1}-{month}"
+        if prev_year_period in all_periods:
+            return prev_year_period
+    
+    # Format 2: "2024-W01" oder "2024W01" (Jahr-Woche)
+    week_match = re.match(r'^(\d{4})[-\s]?[Ww](\d+)$', str(period_str))
+    if week_match:
+        year = int(week_match.group(1))
+        week = week_match.group(2)
+        prev_year_period = f"{year-1}-W{week.zfill(2)}"
+        if prev_year_period in all_periods:
+            return prev_year_period
+        # Versuche auch ohne Bindestrich
+        prev_year_period = f"{year-1}W{week.zfill(2)}"
+        if prev_year_period in all_periods:
+            return prev_year_period
+    
+    # Format 3: "2024" (Jahr)
+    if re.match(r'^\d{4}$', str(period_str)):
+        year = int(str(period_str))
+        prev_year_period = str(year - 1)
+        if prev_year_period in all_periods:
+            return prev_year_period
+    
+    # Format 4: Datum-Format - versuche zu parsen
+    try:
+        period_date = pd.to_datetime(period_str, errors='coerce')
+        if pd.notna(period_date):
+            prev_year_date = period_date - pd.DateOffset(years=1)
+            # Versuche verschiedene Formate zu finden
+            for fmt in ['%Y-%m', '%Y-%m-%d', '%Y']:
+                prev_year_str = prev_year_date.strftime(fmt)
+                if prev_year_str in all_periods:
+                    return prev_year_str
+    except:
+        pass
+    
+    return None
+
+def create_year_comparison_table(all_current_data, all_previous_year_data, traffic_type='normal'):
+    """Erstellt eine Vergleichstabelle für alle verfügbaren Zeiträume zwischen aktuellem Jahr und Vorjahr"""
+    if all_previous_year_data is None or len(all_previous_year_data) == 0:
+        return None
+    
+    if all_current_data is None or len(all_current_data) == 0:
+        return None
+    
+    # Erstelle Mapping: Zeitraum -> Vorjahreszeitraum
+    all_current_periods = all_current_data['Zeitraum'].unique().tolist()
+    all_previous_periods = all_previous_year_data['Zeitraum'].unique().tolist()
+    
+    # Bestimme Einheiten-Spalte (prüfe anhand der ersten Zeile)
+    units_col_name = None
+    if len(all_current_data) > 0 and len(all_previous_year_data) > 0:
+        first_current = all_current_data.iloc[0]
+        first_previous = all_previous_year_data.iloc[0]
+        
+        if traffic_type == 'normal' and 'Bestellte Einheiten (Gesamt)' in first_current.index and 'Bestellte Einheiten (Gesamt)' in first_previous.index:
+            units_col_name = 'Bestellte Einheiten (Gesamt)'
+        elif traffic_type == 'B2B':
+            current_df = pd.DataFrame([first_current])
+            previous_df = pd.DataFrame([first_previous])
+            b2b_col_current = find_b2b_units_column(current_df)
+            b2b_col_previous = find_b2b_units_column(previous_df)
+            if b2b_col_current and b2b_col_previous and b2b_col_current == b2b_col_previous:
+                units_col_name = b2b_col_current
+            elif 'Bestellte Einheiten – B2B' in first_current.index and 'Bestellte Einheiten – B2B' in first_previous.index:
+                units_col_name = 'Bestellte Einheiten – B2B'
+            elif 'Bestellte Einheiten - B2B' in first_current.index and 'Bestellte Einheiten - B2B' in first_previous.index:
+                units_col_name = 'Bestellte Einheiten - B2B'
+        else:
+            if 'Bestellte Einheiten (Gesamt)' in first_current.index and 'Bestellte Einheiten (Gesamt)' in first_previous.index:
+                units_col_name = 'Bestellte Einheiten (Gesamt)'
+            elif 'Bestellte Einheiten' in first_current.index and 'Bestellte Einheiten' in first_previous.index:
+                units_col_name = 'Bestellte Einheiten'
+    
+    # Erstelle Vergleichsdaten für alle Zeiträume
+    comparison_rows = []
+    
+    # Sortiere Zeiträume intelligent (versuche Datum zu parsen, sonst alphabetisch)
+    def sort_period(period):
+        try:
+            # Versuche als Datum zu parsen
+            period_str = str(period)
+            # Format "2024-01" oder "2024-01-01"
+            if re.match(r'^\d{4}-\d{2}', period_str):
+                return pd.to_datetime(period_str, errors='coerce')
+            # Format "2024-W01"
+            elif re.match(r'^\d{4}-W\d+', period_str):
+                year = int(period_str[:4])
+                week = int(period_str.split('W')[1])
+                return pd.to_datetime(f"{year}-W{week:02d}-1", format='%Y-W%W-%w', errors='coerce')
+            # Format "2024"
+            elif re.match(r'^\d{4}$', period_str):
+                return pd.to_datetime(period_str, format='%Y', errors='coerce')
+            else:
+                return pd.to_datetime(period_str, errors='coerce')
+        except:
+            return period
+    
+    sorted_periods = sorted(all_current_periods, key=sort_period)
+    
+    for current_period in sorted_periods:
+        # Finde den entsprechenden Vorjahreszeitraum
+        previous_year_period = find_previous_year_period(current_period, all_previous_periods)
+        
+        if not previous_year_period:
+            continue
+        
+        # Hole Daten für beide Zeiträume
+        current_row = all_current_data[all_current_data['Zeitraum'] == current_period]
+        previous_row = all_previous_year_data[all_previous_year_data['Zeitraum'] == previous_year_period]
+        
+        if len(current_row) == 0 or len(previous_row) == 0:
+            continue
+        
+        current = current_row.iloc[0]
+        previous_year = previous_row.iloc[0]
+        
+        # Erstelle Zeile für diesen Zeitraum
+        row_data = {'Zeitraum': current_period}
+        
+        # Bestellte Einheiten
+        if units_col_name and units_col_name in current.index and units_col_name in previous_year.index:
+            current_val = current[units_col_name]
+            prev_val = previous_year[units_col_name]
+            change = current_val - prev_val
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['Einheiten (Aktuell)'] = format_number_de(current_val, 0)
+            row_data['Einheiten (Vorjahr)'] = format_number_de(prev_val, 0)
+            row_data['Einheiten (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        # Umsatz
+        if 'Umsatz' in current.index and 'Umsatz' in previous_year.index:
+            current_val = current['Umsatz']
+            prev_val = previous_year['Umsatz']
+            change = current_val - prev_val
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['Umsatz (Aktuell)'] = f"{format_number_de(current_val, 2)} €"
+            row_data['Umsatz (Vorjahr)'] = f"{format_number_de(prev_val, 2)} €"
+            row_data['Umsatz (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        # Seitenaufrufe
+        if 'Seitenaufrufe' in current.index and 'Seitenaufrufe' in previous_year.index:
+            current_val = current['Seitenaufrufe']
+            prev_val = previous_year['Seitenaufrufe']
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['Seitenaufrufe (Aktuell)'] = format_number_de(current_val, 0)
+            row_data['Seitenaufrufe (Vorjahr)'] = format_number_de(prev_val, 0)
+            row_data['Seitenaufrufe (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        # Sitzungen
+        if 'Sitzungen' in current.index and 'Sitzungen' in previous_year.index:
+            current_val = current['Sitzungen']
+            prev_val = previous_year['Sitzungen']
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['Sitzungen (Aktuell)'] = format_number_de(current_val, 0)
+            row_data['Sitzungen (Vorjahr)'] = format_number_de(prev_val, 0)
+            row_data['Sitzungen (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        # Conversion Rate
+        if 'Conversion Rate (%)' in current.index and 'Conversion Rate (%)' in previous_year.index:
+            current_val = current['Conversion Rate (%)']
+            prev_val = previous_year['Conversion Rate (%)']
+            change = current_val - prev_val
+            row_data['CR (Aktuell)'] = f"{format_number_de(current_val, 2)}%"
+            row_data['CR (Vorjahr)'] = f"{format_number_de(prev_val, 2)}%"
+            row_data['CR (Änderung PP)'] = f"{format_number_de(change, 2)}"
+        
+        # AOV
+        if 'AOV (€)' in current.index and 'AOV (€)' in previous_year.index:
+            current_val = current['AOV (€)']
+            prev_val = previous_year['AOV (€)']
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['AOV (Aktuell)'] = f"{format_number_de(current_val, 2)} €"
+            row_data['AOV (Vorjahr)'] = f"{format_number_de(prev_val, 2)} €"
+            row_data['AOV (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        # Revenue per Session
+        if 'Revenue per Session (€)' in current.index and 'Revenue per Session (€)' in previous_year.index:
+            current_val = current['Revenue per Session (€)']
+            prev_val = previous_year['Revenue per Session (€)']
+            change_pct = ((current_val / prev_val - 1) * 100) if prev_val > 0 else 0
+            row_data['RPS (Aktuell)'] = f"{format_number_de(current_val, 2)} €"
+            row_data['RPS (Vorjahr)'] = f"{format_number_de(prev_val, 2)} €"
+            row_data['RPS (Änderung %)'] = format_percentage_de(change_pct, 1)
+        
+        comparison_rows.append(row_data)
+    
+    if comparison_rows:
+        return pd.DataFrame(comparison_rows)
+    return None
 
 def generate_summary(current_data, previous_data, traffic_type='normal'):
     """Generiert eine Zusammenfassung der Änderungen"""
@@ -2882,11 +3186,46 @@ if uploaded_files:
             if cr_col_normal_summary and cr_col_normal_summary in summary_data.columns:
                 # Verwende Normal Conversion Rate Spalte
                 summary_data['Conversion Rate (%)'] = summary_data[cr_col_normal_summary].fillna(0)
+                
+                # Debug-Ausgabe für Summary Conversion Rate aus Normal-Spalte
+                with st.expander("🔍 Debug: Conversion Rate Berechnung für Summary (aus Normal-Spalte)", expanded=False):
+                    st.write(f"**Verwendete Spalte:** `{cr_col_normal_summary}`")
+                    st.write("**Berechnete Werte:**")
+                    debug_df = summary_data[['Zeitraum', cr_col_normal_summary, 'Conversion Rate (%)']].copy()
+                    debug_df['Quelle'] = 'Normal Conversion Rate Spalte'
+                    st.dataframe(debug_df, use_container_width=True)
             elif cr_col_b2b_summary and cr_col_b2b_summary in summary_data.columns:
                 # Verwende B2B Conversion Rate Spalte
                 summary_data['Conversion Rate (%)'] = summary_data[cr_col_b2b_summary].fillna(0)
+                
+                # Debug-Ausgabe für Summary Conversion Rate aus B2B-Spalte
+                with st.expander("🔍 Debug: Conversion Rate Berechnung für Summary (aus B2B-Spalte)", expanded=False):
+                    st.write(f"**Verwendete Spalte:** `{cr_col_b2b_summary}`")
+                    st.write("**Berechnete Werte:**")
+                    debug_df = summary_data[['Zeitraum', cr_col_b2b_summary, 'Conversion Rate (%)']].copy()
+                    debug_df['Quelle'] = 'B2B Conversion Rate Spalte'
+                    st.dataframe(debug_df, use_container_width=True)
             elif 'Sitzungen' in summary_data.columns and 'Bestellungen' in summary_data.columns:
                 # Fallback: Berechne aus Bestellposten / Sitzungen * 100
+                # Debug-Ausgabe vor der Berechnung
+                with st.expander("🔍 Debug: Conversion Rate Berechnung für Summary (aus Bestellungen/Sitzungen)", expanded=False):
+                    st.write("**Verwendete Spalten:**")
+                    st.write("- Bestellungen: `Bestellungen`")
+                    st.write("- Sitzungen: `Sitzungen`")
+                    st.write("**Berechnung pro Zeitraum:**")
+                    debug_df = summary_data[['Zeitraum', 'Bestellungen', 'Sitzungen']].copy()
+                    debug_df['Berechnung'] = debug_df.apply(
+                        lambda row: f"{row['Bestellungen']} / {row['Sitzungen']} * 100" if pd.notna(row['Sitzungen']) and row['Sitzungen'] != 0 
+                        else "0 (Sitzungen = 0 oder NaN)",
+                        axis=1
+                    )
+                    debug_df['Ergebnis (%)'] = (
+                        (debug_df['Bestellungen'] / debug_df['Sitzungen'].replace(0, np.nan) * 100)
+                        .fillna(0)
+                        .replace([np.inf, -np.inf], 0)
+                    )
+                    st.dataframe(debug_df, use_container_width=True)
+                
                 summary_data['Conversion Rate (%)'] = (
                     (summary_data['Bestellungen'] / summary_data['Sitzungen'].replace(0, np.nan) * 100)
                     .fillna(0)
@@ -2942,12 +3281,40 @@ if uploaded_files:
                 # Bei kombinierter Ansicht: Verwende 'normal' als traffic_type (ist nur für Formatierung)
                 summary_traffic_type = 'normal' if show_combined else traffic_type_key
                 summary = generate_summary(current_data, previous_data, summary_traffic_type)
+                st.markdown(summary)
+                
+                # Vorjahresvergleich: Erstelle Tabelle für alle verfügbaren Zeiträume
+                # Finde alle Zeiträume des aktuellen Jahres und die entsprechenden Vorjahreszeiträume
+                all_current_periods = summary_aggregated_data['Zeitraum'].unique().tolist()
+                all_previous_year_periods = []
+                
+                # Sammle alle Vorjahreszeiträume
+                for period in all_current_periods:
+                    prev_year_period = find_previous_year_period(period, summary_aggregated_data['Zeitraum'].unique().tolist())
+                    if prev_year_period and prev_year_period not in all_previous_year_periods:
+                        all_previous_year_periods.append(prev_year_period)
+                
+                if all_previous_year_periods:
+                    # Filtere Daten für alle Vorjahreszeiträume
+                    previous_year_data_all = summary_aggregated_data[summary_aggregated_data['Zeitraum'].isin(all_previous_year_periods)].copy()
+                    
+                    if len(previous_year_data_all) > 0:
+                        # Übergib alle Daten für den Vergleich
+                        year_comparison_table = create_year_comparison_table(summary_aggregated_data, previous_year_data_all, summary_traffic_type)
+                        if year_comparison_table is not None and len(year_comparison_table) > 0:
+                            st.subheader("📊 Vergleichstabelle: Alle Zeiträume - Aktuell vs. Vorjahr")
+                            st.markdown("**Übersicht aller verfügbaren Zeiträume im Vergleich zum Vorjahr:**")
+                            st.dataframe(
+                                year_comparison_table,
+                                use_container_width=True,
+                                hide_index=True
+                            )
             else:
                 summary = "Fehler beim Laden der Zeiträume. Bitte wählen Sie andere Zeiträume aus."
+                st.markdown(summary)
         else:
             summary = "Nur ein Zeitraum verfügbar. Lade weitere Dateien hoch, um Vergleiche zu sehen."
-        
-        st.markdown(summary)
+            st.markdown(summary)
         
         # Top- und Flop-ASINs (nur bei ASIN-Level Reports)
         if not is_account_level:
